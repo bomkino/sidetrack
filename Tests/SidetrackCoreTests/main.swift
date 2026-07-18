@@ -1,0 +1,76 @@
+import Foundation
+import SidetrackCore
+
+private var checks = 0
+
+private func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
+    checks += 1
+    guard condition() else {
+        FileHandle.standardError.write(Data("FAIL: \(message)\n".utf8))
+        exit(1)
+    }
+}
+
+var calendar = Calendar(identifier: .gregorian)
+calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+let date = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 17, minute: 16))!
+expect(TimeLanguage.clock(date, calendar: calendar) == "Friday, quarter past five", "clock uses calm bucket")
+expect(TimeLanguage.dateLine(date, calendar: calendar) == "Friday, 17 July", "date has its own quiet line")
+
+expect(TimeLanguage.timer(seconds: 25 * 60) == "~25 minutes left", "timer rounds to 25 minutes")
+expect(TimeLanguage.timer(seconds: 20 * 60) == "~20 minutes left", "timer stays approximate")
+expect(TimeLanguage.timer(seconds: 2 * 60) == "a few minutes left", "timer hides precision near end")
+
+for minute in 0..<60 {
+    let mapped = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 17, minute: minute))!
+    let phrase = TimeLanguage.clockPhrase(mapped, calendar: calendar)
+    expect(!phrase.contains("about") && !phrase.contains(":"), "every clock minute maps to spoken calm language")
+}
+
+let now = Date(timeIntervalSince1970: 1_000)
+var workTimer = FocusTimer(status: .running, remainingSeconds: 60, endsAt: now)
+expect(TimerEngine.refresh(&workTimer, now: now) == .workEnded, "work end emits event")
+expect(workTimer.status == .awaitingWorkChoice, "work waits for choice")
+expect(workTimer.endsAt == nil, "work does not auto-start break")
+
+var breakTimer = FocusTimer(phase: .shortBreak, status: .running, remainingSeconds: 60, endsAt: now)
+expect(TimerEngine.refresh(&breakTimer, now: now) == .breakEnded, "break end emits event")
+expect(breakTimer.status == .awaitingBreakChoice, "break does not auto-restart")
+
+var cycleTimer = FocusTimer(status: .awaitingWorkChoice, remainingSeconds: 0, completedCyclesInSet: 3)
+TimerEngine.takeBreak(&cycleTimer, settings: PomodoroSettings(cyclesPerSet: 4), now: now)
+expect(cycleTimer.phase == .longBreak, "long break follows configured cycle count")
+expect(cycleTimer.completedCyclesInSet == 0, "cycle set resets after long break")
+
+let defaults = PomodoroSettings()
+expect(defaults.workMinutes == 50, "default focus is 50 minutes")
+expect(defaults.breakMinutes == 12, "default break is 12 minutes")
+expect(defaults.cyclesPerSet == 3, "default set contains three cycles")
+expect(defaults.longBreakMinutes == 30, "default long break is 30 minutes")
+var resetTimer = FocusTimer(phase: .longBreak, status: .running, remainingSeconds: 10, endsAt: now, completedCyclesInSet: 2)
+TimerEngine.reset(&resetTimer, settings: defaults)
+expect(resetTimer.phase == .work && resetTimer.status == .idle, "timer reset returns to idle work")
+expect(resetTimer.remainingSeconds == 50 * 60, "timer reset restores configured work duration")
+
+let exported = MarkdownExporter.render(AppData.firstRun, date: date, calendar: calendar)
+expect(exported.contains("# Friday, 17 July 2026"), "Markdown export has day heading")
+expect(exported.contains("- [ ] edit wireframe video…"), "Markdown export contains main thought")
+expect(exported.contains("  - [ ] watch the latest render once, without touching it"), "Markdown export contains subthoughts")
+expect(exported.contains("## Distractions\n0"), "Markdown export contains daily distraction count")
+
+let testDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    .appendingPathComponent("build/test-output/\(UUID().uuidString)")
+let store = DataStore(fileURL: testDirectory.appendingPathComponent("sidetrack.json"))
+let expected = AppData(mainTask: TaskItem(title: "Make the first honest cut"))
+do {
+    try store.save(expected)
+    expect(store.load() == expected, "JSON store round-trips")
+    let text = try String(contentsOf: store.fileURL, encoding: .utf8)
+    expect(text.contains("Make the first honest cut"), "JSON remains human-readable")
+    try FileManager.default.removeItem(at: testDirectory)
+} catch {
+    FileHandle.standardError.write(Data("FAIL: store check: \(error)\n".utf8))
+    exit(1)
+}
+
+print("Sidetrack checks passed: \(checks)")
