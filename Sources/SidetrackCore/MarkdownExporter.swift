@@ -12,12 +12,12 @@ public enum MarkdownExporter {
         if let main = data.mainTask {
             append(main, to: &lines)
         } else {
-            lines.append("_Nothing held here._")
+            lines.append("_A quiet page._")
         }
         lines.append("")
         lines.append("## Later, today")
         if data.today.isEmpty {
-            lines.append("_Nothing else held._")
+            lines.append("_Nothing waiting below._")
         } else {
             for task in data.today { append(task, to: &lines) }
         }

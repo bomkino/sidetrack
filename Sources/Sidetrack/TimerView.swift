@@ -44,41 +44,67 @@ final class TimerView: NSView {
         let remaining = TimerEngine.secondsRemaining(timer)
         switch timer.status {
         case .awaitingWorkChoice:
-            drawText("Take a break?", in: NSRect(x: 0, y: 4, width: 120, height: 28),
-                     font: Typography.italic(18), color: Palette.paper)
-            firstOption = NSRect(x: 126, y: 4, width: 72, height: 28)
-            secondOption = NSRect(x: 204, y: 4, width: 105, height: 28)
-            drawText("yes", in: firstOption, font: Typography.roman(14), color: Palette.ochre)
-            drawText("·  stay here", in: secondOption, font: Typography.roman(14), color: Palette.quiet)
-            drawAttentionUnderline(from: 0, to: 101, y: 31)
+            let isLong = timer.completedCyclesInSet + 1 >= settings.cyclesPerSet
+            let minutes = isLong ? settings.longBreakMinutes : settings.breakMinutes
+            drawText("Focus finished  ·  Take a \(minutes)-minute break?",
+                     in: NSRect(x: 0, y: 0, width: bounds.width, height: 27),
+                     font: Typography.italic(17), color: Palette.paper)
+            firstOption = NSRect(x: 0, y: 27, width: 92, height: 24)
+            secondOption = NSRect(x: 98, y: 27, width: 112, height: 24)
+            drawOption("Begin break", key: "B", in: firstOption)
+            drawOption("·  Keep working", key: "K", in: secondOption)
         case .awaitingBreakChoice:
-            drawText("Start again?", in: NSRect(x: 0, y: 4, width: 112, height: 28),
-                     font: Typography.italic(18), color: Palette.paper)
-            firstOption = NSRect(x: 118, y: 4, width: 72, height: 28)
-            drawText("when ready", in: firstOption, font: Typography.roman(14), color: Palette.ochre)
-            drawAttentionUnderline(from: 0, to: 92, y: 31)
+            drawText("Break finished  ·  Start a \(settings.workMinutes)-minute focus?",
+                     in: NSRect(x: 0, y: 0, width: bounds.width, height: 27),
+                     font: Typography.italic(17), color: Palette.paper)
+            firstOption = NSRect(x: 0, y: 27, width: 86, height: 24)
+            secondOption = NSRect(x: 92, y: 27, width: 70, height: 24)
+            drawOption("Start focus", key: "S", in: firstOption)
+            drawOption("·  Not yet", key: "N", in: secondOption)
         default:
-            let resting = timer.status == .paused ? "resting  ·  " : ""
-            drawText("\(resting)\(TimeLanguage.timer(seconds: remaining))  ·  \(TimeLanguage.clockPhrase(Date()))",
-                     in: NSRect(x: 0, y: 2, width: bounds.width, height: 34),
+            drawText(statusLine(remaining: remaining),
+                     in: NSRect(x: 0, y: 0, width: bounds.width, height: 29),
                      font: Typography.italic(17), color: Palette.quiet, tracking: 0.02)
+            drawText(clickInstruction(),
+                     in: NSRect(x: 0, y: 26, width: bounds.width, height: 22),
+                     font: Typography.roman(11), color: Palette.faint, tracking: 0.1)
         }
-        drawText(TimeLanguage.dateLine(Date()),
-                 in: NSRect(x: 0, y: 29, width: bounds.width, height: 24),
-                 font: Typography.roman(12), color: Palette.faint, tracking: 0.18)
     }
 
-    private func drawAttentionUnderline(from start: CGFloat, to end: CGFloat, y: CGFloat) {
-        let underline = NSBezierPath()
-        underline.move(to: NSPoint(x: start, y: y))
-        underline.curve(
-            to: NSPoint(x: end, y: y + 0.3),
-            controlPoint1: NSPoint(x: start + (end - start) * 0.35, y: y - 0.7),
-            controlPoint2: NSPoint(x: start + (end - start) * 0.68, y: y + 0.8)
+    private func statusLine(remaining: Int) -> String {
+        TimeLanguage.rhythmLine(
+            phase: timer.phase,
+            status: timer.status,
+            seconds: remaining,
+            settings: settings
         )
-        Palette.ochre.withAlphaComponent(0.58).setStroke()
-        underline.lineWidth = 0.8
-        underline.stroke()
+    }
+
+    private func clickInstruction() -> String {
+        switch timer.status {
+        case .idle: return "click to begin"
+        case .running: return "click to pause"
+        case .paused: return "click to resume"
+        case .awaitingWorkChoice, .awaitingBreakChoice: return ""
+        }
+    }
+
+    private func drawOption(_ text: String, key: Character, in rect: NSRect) {
+        let attributed = NSMutableAttributedString(
+            string: text,
+            attributes: [
+                .font: Typography.roman(13),
+                .foregroundColor: Palette.quiet
+            ]
+        )
+        if let index = text.firstIndex(of: key) {
+            attributed.addAttribute(
+                .foregroundColor,
+                value: Palette.paper,
+                range: NSRange(location: text.distance(from: text.startIndex, to: index), length: 1)
+            )
+        }
+        attributed.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 
     override func mouseDown(with event: NSEvent) {

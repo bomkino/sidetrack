@@ -6,6 +6,7 @@ BUILD="$ROOT/build/release"
 APP="$ROOT/build/Sidetrack.app"
 ICONSET="$BUILD/Sidetrack.iconset"
 
+rm -rf "$APP" "$ICONSET"
 mkdir -p "$BUILD/ModuleCache" "$ICONSET"
 
 swiftc -O \
@@ -48,6 +49,7 @@ cp "$BUILD/Sidetrack.icns" "$APP/Contents/Resources/Sidetrack.icns"
 cp "$ROOT/Resources/Fonts/Newsreader.ttf" "$APP/Contents/Resources/Newsreader.ttf"
 cp "$ROOT/Resources/Fonts/Newsreader-Italic.ttf" "$APP/Contents/Resources/Newsreader-Italic.ttf"
 cp "$ROOT/Resources/Fonts/OFL.txt" "$APP/Contents/Resources/Newsreader-OFL.txt"
+xattr -cr "$APP"
 codesign --force --deep --sign - "$APP"
 
 echo "$APP"

@@ -8,10 +8,10 @@ The main thought is writing, not a widget. You can write over it whenever the wo
 
 Time is intentionally imprecise. Seconds invite bargaining and clock-watching. `~20 minutes left` is enough to orient without turning focus into a race. Clock time moves in quarters for the same reason.
 
-When focus ends, Sidetrack underlines one quiet question. It does not make a sound by default. It does not start a break. Flow gets the final vote.
+The timer’s language stays literal because a control should not make you interpret it: Focus, Focus paused, Short break, Long break. Every ordinary state says what a click will do. When focus ends, Sidetrack asks one plain question. It does not make a sound by default. It does not start a break. Flow gets the final vote.
 
 The distraction clicker is not a score. A tap means only: “I noticed.” Past counts remain available without streaks, graphs, goals, judgment, or celebration.
 
-Everything stays on the Mac. The app asks for no identity and sends nothing away.
+Everything stays on the Mac. At day change, a plain Markdown memory is written locally; the page itself changes only when you choose a fresh start. The app asks for no identity and sends nothing away.
 
 This shape will not fit every ADHD or ADD brain. It was made for one kind of restless attention, then released freely in the hope that it may feel kind to another.

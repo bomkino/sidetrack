@@ -6,13 +6,14 @@ final class PreferencesController: NSWindowController {
     private let breakField = NSTextField()
     private let longBreakField = NSTextField()
     private let cyclesField = NSTextField()
+    private let clockField = NSTextField()
     private let chimeButton = NSButton(checkboxWithTitle: "One soft chime", target: nil, action: nil)
     private let onSave: (PomodoroSettings) -> Void
 
     init(settings: PomodoroSettings, onSave: @escaping (PomodoroSettings) -> Void) {
         self.onSave = onSave
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 390, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 390, height: 366),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -32,17 +33,19 @@ final class PreferencesController: NSWindowController {
         content.layer?.backgroundColor = Palette.background.cgColor
 
         let title = label("A rhythm, chosen once", size: 20, color: Palette.paper)
-        title.frame = NSRect(x: 28, y: 266, width: 330, height: 28)
+        title.frame = NSRect(x: 28, y: 312, width: 330, height: 28)
         content.addSubview(title)
 
         let note = label("Nothing starts without you.", size: 12, color: Palette.quiet)
-        note.frame = NSRect(x: 28, y: 240, width: 330, height: 20)
+        note.frame = NSRect(x: 28, y: 286, width: 330, height: 20)
         content.addSubview(note)
 
-        addRow("Focus", field: workField, value: settings.workMinutes, suffix: "minutes", y: 194, to: content)
-        addRow("Break", field: breakField, value: settings.breakMinutes, suffix: "minutes", y: 156, to: content)
-        addRow("Long break", field: longBreakField, value: settings.longBreakMinutes, suffix: "minutes", y: 118, to: content)
-        addRow("Long break after", field: cyclesField, value: settings.cyclesPerSet, suffix: "cycles", y: 80, to: content)
+        addRow("Focus", field: workField, value: settings.workMinutes, suffix: "minutes", y: 240, to: content)
+        addRow("Break", field: breakField, value: settings.breakMinutes, suffix: "minutes", y: 202, to: content)
+        addRow("Long break", field: longBreakField, value: settings.longBreakMinutes, suffix: "minutes", y: 164, to: content)
+        addRow("Long break after", field: cyclesField, value: settings.cyclesPerSet, suffix: "cycles", y: 126, to: content)
+        addRow("Clock", field: clockField, value: settings.clockOffsetMinutes, suffix: "minutes ahead", y: 88, to: content)
+        clockField.stringValue = settings.clockOffsetMinutes >= 0 ? "+\(settings.clockOffsetMinutes)" : "\(settings.clockOffsetMinutes)"
 
         chimeButton.frame = NSRect(x: 25, y: 42, width: 180, height: 24)
         chimeButton.state = settings.chimeEnabled ? .on : .off
@@ -85,7 +88,8 @@ final class PreferencesController: NSWindowController {
             breakMinutes: breakField.integerValue,
             longBreakMinutes: longBreakField.integerValue,
             cyclesPerSet: cyclesField.integerValue,
-            chimeEnabled: chimeButton.state == .on
+            chimeEnabled: chimeButton.state == .on,
+            clockOffsetMinutes: clockField.integerValue
         )
         settings.normalize()
         onSave(settings)

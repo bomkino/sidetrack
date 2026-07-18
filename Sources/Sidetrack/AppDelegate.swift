@@ -102,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         fileItem.submenu = fileMenu
         let export = fileMenu.addItem(withTitle: "Export Day…", action: #selector(exportDay), keyEquivalent: "e")
         export.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(withTitle: "Show Saved Days", action: #selector(showSavedDays), keyEquivalent: "")
 
         let editItem = NSMenuItem()
         menu.addItem(editItem)
@@ -125,10 +126,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         subtask.keyEquivalentModifierMask = [.command, .shift]
         taskMenu.addItem(withTitle: "Edit Main Task", action: #selector(editMain), keyEquivalent: "e")
         taskMenu.addItem(withTitle: "Promote Next", action: #selector(promoteNext), keyEquivalent: "p")
+        taskMenu.addItem(withTitle: "Check Next Step", action: #selector(completeNextSubtask), keyEquivalent: "")
         taskMenu.addItem(withTitle: "Complete Main Task", action: #selector(completeMain), keyEquivalent: "x")
         taskMenu.addItem(.separator())
-        taskMenu.addItem(withTitle: "Reset Timer", action: #selector(resetTimer), keyEquivalent: "")
-        taskMenu.addItem(withTitle: "Start Fresh Day…", action: #selector(startFreshDay), keyEquivalent: "")
+        taskMenu.addItem(withTitle: "Reset Rhythm", action: #selector(resetTimer), keyEquivalent: "")
+        taskMenu.addItem(withTitle: "Begin Fresh Day…", action: #selector(startFreshDay), keyEquivalent: "")
 
         let viewItem = NSMenuItem()
         menu.addItem(viewItem)
@@ -164,7 +166,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func editMain() { focusView.editMain() }
     @objc private func promoteNext() { focusView.promoteNext() }
     @objc private func completeMain() { focusView.completeMain() }
+    @objc private func completeNextSubtask() { focusView.completeNextSubtask() }
     @objc private func exportDay() { focusView.exportDay() }
+    @objc private func showSavedDays() { focusView.showSavedDays() }
     @objc private func resetTimer() { focusView.resetTimer() }
     @objc private func startFreshDay() { focusView.startFreshDay() }
 }

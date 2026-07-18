@@ -2,8 +2,9 @@ import Foundation
 
 public final class DataStore {
     public let fileURL: URL
+    public let daysDirectoryURL: URL
 
-    public init(fileURL: URL? = nil) {
+    public init(fileURL: URL? = nil, daysDirectoryURL: URL? = nil) {
         if let fileURL {
             self.fileURL = fileURL
         } else if let path = ProcessInfo.processInfo.environment["SIDETRACK_DATA_PATH"] {
@@ -13,6 +14,8 @@ public final class DataStore {
             self.fileURL = base.appendingPathComponent("Sidetrack", isDirectory: true)
                 .appendingPathComponent("sidetrack.json")
         }
+        self.daysDirectoryURL = daysDirectoryURL
+            ?? self.fileURL.deletingLastPathComponent().appendingPathComponent("Days", isDirectory: true)
     }
 
     public func load() -> AppData {
@@ -38,5 +41,14 @@ public final class DataStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(value).write(to: fileURL, options: .atomic)
+    }
+
+    @discardableResult
+    public func archive(_ value: AppData, for date: Date, calendar: Calendar = .current) throws -> URL {
+        try FileManager.default.createDirectory(at: daysDirectoryURL, withIntermediateDirectories: true)
+        let url = daysDirectoryURL.appendingPathComponent("\(DistractionLog.key(for: date, calendar: calendar)).md")
+        try MarkdownExporter.render(value, date: date, calendar: calendar)
+            .write(to: url, atomically: true, encoding: .utf8)
+        return url
     }
 }

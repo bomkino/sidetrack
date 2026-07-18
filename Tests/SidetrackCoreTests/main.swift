@@ -20,6 +20,30 @@ expect(TimeLanguage.dateLine(date, calendar: calendar) == "Friday, 17 July", "da
 expect(TimeLanguage.timer(seconds: 25 * 60) == "~25 minutes left", "timer rounds to 25 minutes")
 expect(TimeLanguage.timer(seconds: 20 * 60) == "~20 minutes left", "timer stays approximate")
 expect(TimeLanguage.timer(seconds: 2 * 60) == "a few minutes left", "timer hides precision near end")
+expect(TimeLanguage.rhythmLine(phase: .work, status: .idle, seconds: 50 * 60, settings: PomodoroSettings()) == "Ready  ·  50-minute focus", "idle state says exactly what can begin")
+expect(TimeLanguage.rhythmLine(phase: .work, status: .running, seconds: 50 * 60, settings: PomodoroSettings()) == "Focus  ·  ~50 minutes left", "running focus is explicit")
+expect(TimeLanguage.rhythmLine(phase: .work, status: .paused, seconds: 50 * 60, settings: PomodoroSettings()) == "Focus paused  ·  ~50 minutes left", "paused focus uses the literal state")
+expect(TimeLanguage.rhythmLine(phase: .shortBreak, status: .running, seconds: 12 * 60, settings: PomodoroSettings()) == "Short break  ·  ~12 minutes left", "short break names its own countdown")
+expect(TimeLanguage.rhythmLine(phase: .longBreak, status: .running, seconds: 30 * 60, settings: PomodoroSettings()) == "Long break  ·  half an hour left", "long break names its own countdown")
+
+expect(CopyBank.mainPrompt(index: 0) == "edit wireframe video…", "requested main placeholder leads the copy bank")
+expect(CopyBank.mainPrompt(index: CopyBank.next(0)) != CopyBank.mainPrompt(index: 0), "fresh day advances the copy bank")
+
+let late = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 23, minute: 50))!
+let offsetLate = TimeLanguage.adjusted(late, offsetMinutes: 15)
+expect(TimeLanguage.dateLine(offsetLate, calendar: calendar) == "Saturday, 18 July", "+15 display clock crosses midnight calmly")
+expect(TimeLanguage.clockPhrase(offsetLate, calendar: calendar) == "twelve o’clock", "offset clock uses the adjusted day")
+
+for hour in 0..<24 {
+    let phased = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: hour))!
+    expect(!TimeLanguage.dayPhase(phased, calendar: calendar).isEmpty, "every hour has poetic day language")
+}
+expect(TimeLanguage.dayPhase(date, calendar: calendar) == "late light", "late afternoon has its own language")
+
+for hour in 0..<24 {
+    let shifted = BurnInShift.offset(at: date.addingTimeInterval(TimeInterval(hour * 3600)))
+    expect(abs(shifted.x) <= 2.2 && abs(shifted.y) <= 1.8, "burn-in drift never becomes visible motion")
+}
 
 for minute in 0..<60 {
     let mapped = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 17, minute: minute))!
@@ -42,11 +66,19 @@ TimerEngine.takeBreak(&cycleTimer, settings: PomodoroSettings(cyclesPerSet: 4), 
 expect(cycleTimer.phase == .longBreak, "long break follows configured cycle count")
 expect(cycleTimer.completedCyclesInSet == 0, "cycle set resets after long break")
 
+var shortRestTimer = FocusTimer(status: .awaitingWorkChoice, remainingSeconds: 0)
+TimerEngine.takeBreak(&shortRestTimer, settings: PomodoroSettings(), now: now)
+expect(shortRestTimer.phase == .shortBreak && shortRestTimer.status == .running, "choosing a short rest starts a distinct timer")
+expect(shortRestTimer.remainingSeconds == 12 * 60, "short rest receives the full configured countdown")
+
 let defaults = PomodoroSettings()
 expect(defaults.workMinutes == 50, "default focus is 50 minutes")
 expect(defaults.breakMinutes == 12, "default break is 12 minutes")
 expect(defaults.cyclesPerSet == 3, "default set contains three cycles")
 expect(defaults.longBreakMinutes == 30, "default long break is 30 minutes")
+expect(defaults.clockOffsetMinutes == 15, "default display clock is fifteen minutes ahead")
+let legacySettings = try! JSONDecoder().decode(PomodoroSettings.self, from: Data("{\"workMinutes\":25,\"breakMinutes\":5,\"longBreakMinutes\":30,\"cyclesPerSet\":4,\"chimeEnabled\":false}".utf8))
+expect(legacySettings.clockOffsetMinutes == 15, "older settings migrate to the preferred clock offset")
 var resetTimer = FocusTimer(phase: .longBreak, status: .running, remainingSeconds: 10, endsAt: now, completedCyclesInSet: 2)
 TimerEngine.reset(&resetTimer, settings: defaults)
 expect(resetTimer.phase == .work && resetTimer.status == .idle, "timer reset returns to idle work")
@@ -67,6 +99,11 @@ do {
     expect(store.load() == expected, "JSON store round-trips")
     let text = try String(contentsOf: store.fileURL, encoding: .utf8)
     expect(text.contains("Make the first honest cut"), "JSON remains human-readable")
+    let archivedURL = try store.archive(expected, for: date, calendar: calendar)
+    expect(archivedURL.lastPathComponent == "2026-07-17.md", "automatic archive uses a stable day filename")
+    let archived = try String(contentsOf: archivedURL, encoding: .utf8)
+    expect(archived.contains("# Friday, 17 July 2026"), "automatic archive writes readable Markdown")
+    expect(DistractionLog.date(forKey: "2026-07-17", calendar: calendar) == calendar.startOfDay(for: date), "stored day keys return to dates")
     try FileManager.default.removeItem(at: testDirectory)
 } catch {
     FileHandle.standardError.write(Data("FAIL: store check: \(error)\n".utf8))

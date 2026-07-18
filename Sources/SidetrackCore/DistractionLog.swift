@@ -10,6 +10,15 @@ public enum DistractionLog {
         return formatter.string(from: date)
     }
 
+    public static func date(forKey key: String, calendar: Calendar = .current) -> Date? {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: key)
+    }
+
     public static func recentDays(
         from values: [String: Int],
         ending date: Date = Date(),
