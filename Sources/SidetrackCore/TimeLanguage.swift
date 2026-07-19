@@ -33,6 +33,15 @@ public enum TimeLanguage {
         return formatter.string(from: date)
     }
 
+    public static func compactDateLine(_ date: Date, calendar: Calendar = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "EEE, d MMM"
+        return formatter.string(from: date)
+    }
+
     public static func dayPhase(_ date: Date, calendar: Calendar = .current) -> String {
         switch calendar.component(.hour, from: date) {
         case 0...2: return "deep night"

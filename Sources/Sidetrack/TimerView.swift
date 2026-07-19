@@ -3,6 +3,9 @@ import QuartzCore
 import SidetrackCore
 
 final class TimerView: NSView {
+    static let layoutHeight: CGFloat = 54
+    static let followingContentGap: CGFloat = 42
+
     var timer = FocusTimer()
     var settings = PomodoroSettings()
     var onToggle: (() -> Void)?
@@ -19,6 +22,9 @@ final class TimerView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        updateAccessibility()
     }
 
     required init?(coder: NSCoder) { nil }
@@ -33,6 +39,7 @@ final class TimerView: NSView {
             transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer?.add(transition, forKey: "quiet-shift")
         }
+        updateAccessibility()
         needsDisplay = true
     }
 
@@ -105,6 +112,32 @@ final class TimerView: NSView {
             )
         }
         attributed.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+
+    private func updateAccessibility() {
+        let remaining = TimerEngine.secondsRemaining(timer)
+        switch timer.status {
+        case .awaitingWorkChoice:
+            let longBreak = timer.completedCyclesInSet + 1 >= settings.cyclesPerSet
+            let minutes = longBreak ? settings.longBreakMinutes : settings.breakMinutes
+            setAccessibilityLabel("Focus finished. Take a \(minutes)-minute break?")
+            setAccessibilityHelp("Press B to begin the break or K to keep working.")
+        case .awaitingBreakChoice:
+            setAccessibilityLabel("Break finished. Start a \(settings.workMinutes)-minute focus?")
+            setAccessibilityHelp("Press S to start focus or N to wait.")
+        default:
+            setAccessibilityLabel(statusLine(remaining: remaining))
+            setAccessibilityHelp(clickInstruction())
+        }
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        switch timer.status {
+        case .awaitingWorkChoice: onTakeBreak?()
+        case .awaitingBreakChoice: onStartAgain?()
+        default: onToggle?()
+        }
+        return true
     }
 
     override func mouseDown(with event: NSEvent) {
