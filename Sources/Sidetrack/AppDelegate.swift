@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var launchFullScreenPending = false
     private var fullScreenTransitioning = false
     private var launchFullScreenAttempts = 0
+    private var launchActivationAttempts = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -25,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         focusView.save()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if launchFullScreenPending { requestLaunchFullScreen(after: 0.12) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -91,6 +96,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             if self.fullScreenTransitioning {
                 self.requestLaunchFullScreen(after: 0.45)
+                return
+            }
+            guard NSApp.isActive else {
+                if self.launchActivationAttempts < 8 {
+                    self.launchActivationAttempts += 1
+                    NSApp.activate(ignoringOtherApps: true)
+                    self.window.makeKeyAndOrderFront(nil)
+                    self.requestLaunchFullScreen(after: 0.3)
+                }
                 return
             }
             guard self.launchFullScreenAttempts < 4 else {

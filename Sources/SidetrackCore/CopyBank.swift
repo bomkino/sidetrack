@@ -2,33 +2,33 @@ import Foundation
 
 public enum CopyBank {
     public static let main = [
-        "edit wireframe video…",
         "what are you returning to?",
-        "leave the next honest mark.",
-        "begin with the part that still has a pulse.",
+        "what deserves the quiet?",
+        "begin where the work still feels alive.",
+        "leave one honest mark.",
         "what can become clear before you stop?",
-        "make one thing quieter."
+        "make room for the thing that matters."
     ]
 
     private static let later = [
-        "hold something here…",
-        "leave this where you can find it…",
-        "what can wait without disappearing?",
-        "set down what keeps circling…"
+        "leave this here; it can wait.",
+        "what wants remembering?",
+        "set down what keeps circling…",
+        "hold this gently for later…"
     ]
 
     private static let step = [
-        "what is the smallest honest move?",
         "where can your hands begin?",
-        "leave yourself an easy entrance.",
-        "what makes this lighter?"
+        "what is the smallest honest move?",
+        "find the softest way in…",
+        "what would make beginning lighter?"
     ]
 
     private static let sideStep = [
-        "leave a way back in…",
-        "what belongs underneath?",
+        "leave yourself a way back in…",
+        "what belongs just beneath this?",
         "name the first foothold…",
-        "what will help you return?"
+        "what will make returning easy?"
     ]
 
     public static func mainPrompt(index: Int) -> String { pick(main, index) }
