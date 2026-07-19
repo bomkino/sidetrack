@@ -1,6 +1,6 @@
 # Sidetrack
 
-![Sidetrack’s dark, paper-soft focus view: “edit the wireframe video until the first ninety seconds feel inevitable,” a vague timer, three quiet steps, and today’s thoughts.](Docs/Sidetrack-product-portrait.png)
+![Sidetrack’s dark, paper-soft focus view: “shape the opening until the first minute breathes,” a vague timer, three quiet steps, and today’s thoughts.](Docs/Sidetrack-product-portrait.png)
 
 Sidetrack is a quiet second-screen focus display for macOS. One sentence holds the center. Everything else waits in the margin.
 
@@ -28,6 +28,7 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - Counts distractions with a tiny daily `0000` clicker; hover reveals a soft decrement and the keyboard map, while right-click shows seven days.
 - Saves the finished day automatically as readable Markdown after midnight or on the next launch; manual export remains available.
 - Cycles through a small bank of human placeholders when you begin fresh.
+- Begins with an empty page rather than pretending a demo task belongs to you.
 - Saves everything locally as readable JSON.
 
 ## Keys
@@ -92,7 +93,7 @@ Measured in full-screen on a 1920 × 1080 logical second display after the curre
 
 - `0.0%` CPU between minute updates; one brief redraw on the minute, then the process sleeps again
 - roughly `7–11 MB` resident memory after settling
-- `492 KB` executable; `3.1 MB` installed app bundle including font and icon
+- `509 KB` executable; `3.2 MB` installed app bundle including font and icon
 
 The compact layout survived 40 rapid resizes across 900 × 600, 1000 × 700, 1200 × 760, 1440 × 900, and 1920 × 1049. A separate burst of 202 timer and counter actions completed in under one second without a lost write or damaged backup.
 

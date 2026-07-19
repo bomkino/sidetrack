@@ -29,7 +29,7 @@ public final class DataStore {
             if let backup = try? Data(contentsOf: backupURL),
                let recovered = try? decoder.decode(AppData.self, from: backup) {
                 try? backup.write(to: fileURL, options: .atomic)
-                return normalized(recovered)
+                return normalizeAndPersistIfNeeded(recovered)
             }
             return AppData.firstRun
         }
@@ -37,12 +37,12 @@ public final class DataStore {
             if let backup = try? Data(contentsOf: backupURL),
                let recovered = try? decoder.decode(AppData.self, from: backup) {
                 try? backup.write(to: fileURL, options: .atomic)
-                return normalized(recovered)
+                return normalizeAndPersistIfNeeded(recovered)
             }
             try? data.write(to: unreadableURL, options: .atomic)
             return AppData()
         }
-        return normalized(decoded)
+        return normalizeAndPersistIfNeeded(decoded)
     }
 
     public func save(_ value: AppData) throws {
@@ -77,10 +77,62 @@ public final class DataStore {
 
     private func normalized(_ loaded: AppData) -> AppData {
         var loaded = loaded
+        if isLegacyFirstRunSample(loaded) {
+            loaded.mainTask = nil
+            loaded.today = []
+        }
         if !loaded.didSeedFirstRun && loaded.mainTask == nil && loaded.today.isEmpty {
             return AppData.firstRun
         }
         loaded.didSeedFirstRun = true
         return loaded
+    }
+
+    private func normalizeAndPersistIfNeeded(_ loaded: AppData) -> AppData {
+        let result = normalized(loaded)
+        if result != loaded { try? save(result) }
+        return result
+    }
+
+    private func isLegacyFirstRunSample(_ value: AppData) -> Bool {
+        guard let main = value.mainTask,
+              main.title == "edit wireframe video…",
+              !main.isCompleted,
+              main.subtasks.allSatisfy({ !$0.isCompleted }) else { return false }
+
+        let mainSteps = main.subtasks.map(\.title)
+        let later = value.today.map(\.title)
+        let laterSteps = value.today.map { $0.subtasks.map(\.title) }
+        let allLaterOpen = value.today.allSatisfy { task in
+            !task.isCompleted && task.subtasks.allSatisfy { !$0.isCompleted }
+        }
+        guard allLaterOpen else { return false }
+
+        let recentMainSteps = [
+            "watch once without touching the timeline",
+            "notice where the feeling slips away",
+            "make one quiet pass"
+        ]
+        let recentLater = [
+            "listen once with eyes closed",
+            "write tomorrow’s first move",
+            "leave one clean thing for morning"
+        ]
+        let recentLaterSteps = [["leave a note where the rhythm breaks"], [], []]
+
+        let originalMainSteps = [
+            "watch the latest render once, without touching it",
+            "write down where attention wanders",
+            "make one clean pass"
+        ]
+        let originalLater = [
+            "listen once with eyes closed",
+            "write the next move down",
+            "leave one clear note for tomorrow"
+        ]
+        let originalLaterSteps = [["notice where the rhythm slips"], [], []]
+
+        return (mainSteps == recentMainSteps && later == recentLater && laterSteps == recentLaterSteps)
+            || (mainSteps == originalMainSteps && later == originalLater && laterSteps == originalLaterSteps)
     }
 }

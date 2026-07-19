@@ -27,8 +27,9 @@ expect(TimeLanguage.rhythmLine(phase: .work, status: .paused, seconds: 50 * 60, 
 expect(TimeLanguage.rhythmLine(phase: .shortBreak, status: .running, seconds: 12 * 60, settings: PomodoroSettings()) == "Short break  ·  ~12 minutes left", "short break names its own countdown")
 expect(TimeLanguage.rhythmLine(phase: .longBreak, status: .running, seconds: 30 * 60, settings: PomodoroSettings()) == "Long break  ·  half an hour left", "long break names its own countdown")
 
-expect(CopyBank.mainPrompt(index: 0) == "edit wireframe video…", "requested main placeholder leads the copy bank")
+expect(CopyBank.mainPrompt(index: 0) == "what are you returning to?", "first placeholder offers a quiet way back in")
 expect(CopyBank.mainPrompt(index: CopyBank.next(0)) != CopyBank.mainPrompt(index: 0), "fresh day advances the copy bank")
+expect(AppData.firstRun.mainTask == nil && AppData.firstRun.today.isEmpty, "first launch begins as the user’s empty page")
 
 let late = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 23, minute: 50))!
 let offsetLate = TimeLanguage.adjusted(late, offsetMinutes: 15)
@@ -91,10 +92,16 @@ var idleTimer = FocusTimer(status: .idle, remainingSeconds: 50 * 60)
 TimerEngine.resetDurationIfIdle(&idleTimer, settings: PomodoroSettings(workMinutes: 60))
 expect(idleTimer.remainingSeconds == 60 * 60, "new duration applies while the timer is idle")
 
-let exported = MarkdownExporter.render(AppData.firstRun, date: date, calendar: calendar)
+let exportSample = AppData(
+    mainTask: TaskItem(
+        title: "Shape the opening until it breathes",
+        subtasks: [Subtask(title: "Watch once without reaching for the controls")]
+    )
+)
+let exported = MarkdownExporter.render(exportSample, date: date, calendar: calendar)
 expect(exported.contains("# Friday, 17 July 2026"), "Markdown export has day heading")
-expect(exported.contains("- [ ] edit wireframe video…"), "Markdown export contains main thought")
-expect(exported.contains("  - [ ] watch once without touching the timeline"), "Markdown export contains subthoughts")
+expect(exported.contains("- [ ] Shape the opening until it breathes"), "Markdown export contains main thought")
+expect(exported.contains("  - [ ] Watch once without reaching for the controls"), "Markdown export contains subthoughts")
 expect(exported.contains("## Distractions\n0"), "Markdown export contains daily distraction count")
 
 let testDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -122,6 +129,48 @@ do {
     try FileManager.default.removeItem(at: store.fileURL)
     expect(store.load() == expected, "a missing primary file recovers its readable backup")
     expect(FileManager.default.fileExists(atPath: store.fileURL.path), "missing-file recovery restores the primary file")
+
+    let legacyStore = DataStore(fileURL: testDirectory.appendingPathComponent("legacy-seed.json"))
+    let legacySeed = AppData(
+        mainTask: TaskItem(
+            title: "edit wireframe video…",
+            subtasks: [
+                Subtask(title: "watch once without touching the timeline"),
+                Subtask(title: "notice where the feeling slips away"),
+                Subtask(title: "make one quiet pass")
+            ]
+        ),
+        today: [
+            TaskItem(title: "listen once with eyes closed", subtasks: [Subtask(title: "leave a note where the rhythm breaks")]),
+            TaskItem(title: "write tomorrow’s first move"),
+            TaskItem(title: "leave one clean thing for morning")
+        ],
+        distractionsByDay: ["2026-07-17": 2]
+    )
+    try legacyStore.save(legacySeed)
+    let migratedSeed = legacyStore.load()
+    expect(migratedSeed.mainTask == nil && migratedSeed.today.isEmpty, "the exact old demo page becomes a clean first page")
+    expect(migratedSeed.distractionsByDay["2026-07-17"] == 2, "demo migration preserves personal counters and settings")
+
+    let originalLegacyStore = DataStore(fileURL: testDirectory.appendingPathComponent("original-legacy-seed.json"))
+    let originalLegacySeed = AppData(
+        mainTask: TaskItem(
+            title: "edit wireframe video…",
+            subtasks: [
+                Subtask(title: "watch the latest render once, without touching it"),
+                Subtask(title: "write down where attention wanders"),
+                Subtask(title: "make one clean pass")
+            ]
+        ),
+        today: [
+            TaskItem(title: "listen once with eyes closed", subtasks: [Subtask(title: "notice where the rhythm slips")]),
+            TaskItem(title: "write the next move down"),
+            TaskItem(title: "leave one clear note for tomorrow")
+        ]
+    )
+    try originalLegacyStore.save(originalLegacySeed)
+    let migratedOriginalSeed = originalLegacyStore.load()
+    expect(migratedOriginalSeed.mainTask == nil && migratedOriginalSeed.today.isEmpty, "the original demo page also becomes a clean first page")
 
     let damagedStore = DataStore(fileURL: testDirectory.appendingPathComponent("damaged.json"))
     try Data("{still-not-json".utf8).write(to: damagedStore.fileURL, options: .atomic)

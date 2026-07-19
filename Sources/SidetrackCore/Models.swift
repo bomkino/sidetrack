@@ -148,24 +148,7 @@ public struct AppData: Codable, Equatable {
     }
 
     public static var firstRun: AppData {
-        AppData(
-            mainTask: TaskItem(
-                title: "edit wireframe video…",
-                subtasks: [
-                    Subtask(title: "watch once without touching the timeline"),
-                    Subtask(title: "notice where the feeling slips away"),
-                    Subtask(title: "make one quiet pass")
-                ]
-            ),
-            today: [
-                TaskItem(
-                    title: "listen once with eyes closed",
-                    subtasks: [Subtask(title: "leave a note where the rhythm breaks")]
-                ),
-                TaskItem(title: "write tomorrow’s first move"),
-                TaskItem(title: "leave one clean thing for morning")
-            ]
-        )
+        AppData()
     }
 
     private enum CodingKeys: String, CodingKey {
