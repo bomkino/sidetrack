@@ -5,6 +5,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private var focusView: FocusView!
     private var minuteTimer: Timer?
+    private var launchFullScreenPending = false
+    private var fullScreenTransitioning = false
+    private var launchFullScreenAttempts = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -27,7 +30,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func windowDidMove(_ notification: Notification) { rememberCurrentScreen() }
-    func windowDidEnterFullScreen(_ notification: Notification) { rememberCurrentScreen() }
+    func windowWillEnterFullScreen(_ notification: Notification) { fullScreenTransitioning = true }
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        fullScreenTransitioning = false
+        launchFullScreenPending = false
+        rememberCurrentScreen()
+    }
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        fullScreenTransitioning = false
+        requestLaunchFullScreen(after: 0.45)
+    }
+    func windowWillExitFullScreen(_ notification: Notification) {
+        launchFullScreenPending = false
+        fullScreenTransitioning = true
+    }
+    func windowDidExitFullScreen(_ notification: Notification) { fullScreenTransitioning = false }
 
     private func buildWindow() {
         let store = DataStore()
@@ -60,9 +77,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         if ProcessInfo.processInfo.environment["SIDETRACK_WINDOWED"] != "1" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-                guard let self, self.window.styleMask.contains(.fullScreen) == false else { return }
-                self.window.toggleFullScreen(nil)
+            launchFullScreenPending = true
+            requestLaunchFullScreen(after: 0.35)
+        }
+    }
+
+    private func requestLaunchFullScreen(after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.launchFullScreenPending else { return }
+            if self.window.styleMask.contains(.fullScreen) {
+                self.launchFullScreenPending = false
+                return
+            }
+            if self.fullScreenTransitioning {
+                self.requestLaunchFullScreen(after: 0.45)
+                return
+            }
+            guard self.launchFullScreenAttempts < 4 else {
+                self.launchFullScreenPending = false
+                return
+            }
+
+            self.launchFullScreenAttempts += 1
+            NSApp.activate(ignoringOtherApps: true)
+            self.window.makeKeyAndOrderFront(nil)
+            self.window.toggleFullScreen(nil)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+                guard let self, self.launchFullScreenPending,
+                      !self.fullScreenTransitioning,
+                      !self.window.styleMask.contains(.fullScreen) else { return }
+                self.requestLaunchFullScreen(after: 0.2)
             }
         }
     }

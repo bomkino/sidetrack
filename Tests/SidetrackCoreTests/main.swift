@@ -94,7 +94,7 @@ expect(idleTimer.remainingSeconds == 60 * 60, "new duration applies while the ti
 let exported = MarkdownExporter.render(AppData.firstRun, date: date, calendar: calendar)
 expect(exported.contains("# Friday, 17 July 2026"), "Markdown export has day heading")
 expect(exported.contains("- [ ] edit wireframe video…"), "Markdown export contains main thought")
-expect(exported.contains("  - [ ] watch the latest render once, without touching it"), "Markdown export contains subthoughts")
+expect(exported.contains("  - [ ] watch once without touching the timeline"), "Markdown export contains subthoughts")
 expect(exported.contains("## Distractions\n0"), "Markdown export contains daily distraction count")
 
 let testDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -119,6 +119,9 @@ do {
     try Data("{not-json".utf8).write(to: store.fileURL, options: .atomic)
     expect(store.load() == expected, "a damaged primary file recovers the previous readable state")
     expect(store.load() == expected, "recovery restores the primary file on disk")
+    try FileManager.default.removeItem(at: store.fileURL)
+    expect(store.load() == expected, "a missing primary file recovers its readable backup")
+    expect(FileManager.default.fileExists(atPath: store.fileURL.path), "missing-file recovery restores the primary file")
 
     let damagedStore = DataStore(fileURL: testDirectory.appendingPathComponent("damaged.json"))
     try Data("{still-not-json".utf8).write(to: damagedStore.fileURL, options: .atomic)

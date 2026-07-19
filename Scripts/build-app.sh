@@ -4,9 +4,11 @@ set -euo pipefail
 ROOT="${0:A:h:h}"
 BUILD="$ROOT/build/release"
 APP="$ROOT/build/Sidetrack.app"
+ARCHIVE="$ROOT/build/Sidetrack.app.zip"
 ICONSET="$BUILD/Sidetrack.iconset"
 
 rm -rf "$APP" "$ICONSET"
+rm -f "$ARCHIVE"
 mkdir -p "$BUILD/ModuleCache" "$ICONSET"
 
 swiftc -O \
@@ -49,7 +51,11 @@ cp "$BUILD/Sidetrack.icns" "$APP/Contents/Resources/Sidetrack.icns"
 cp "$ROOT/Resources/Fonts/Newsreader.ttf" "$APP/Contents/Resources/Newsreader.ttf"
 cp "$ROOT/Resources/Fonts/Newsreader-Italic.ttf" "$APP/Contents/Resources/Newsreader-Italic.ttf"
 cp "$ROOT/Resources/Fonts/OFL.txt" "$APP/Contents/Resources/Newsreader-OFL.txt"
+find "$APP" -name $'Icon\r' -type f -delete
 xattr -cr "$APP"
 codesign --force --deep --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+ditto -c -k --norsrc --noextattr "$APP" "$ARCHIVE"
 
 echo "$APP"
+echo "$ARCHIVE"

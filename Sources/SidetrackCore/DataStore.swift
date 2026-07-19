@@ -26,26 +26,23 @@ public final class DataStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: fileURL) else {
+            if let backup = try? Data(contentsOf: backupURL),
+               let recovered = try? decoder.decode(AppData.self, from: backup) {
+                try? backup.write(to: fileURL, options: .atomic)
+                return normalized(recovered)
+            }
             return AppData.firstRun
         }
-        guard var decoded = try? decoder.decode(AppData.self, from: data) else {
+        guard let decoded = try? decoder.decode(AppData.self, from: data) else {
             if let backup = try? Data(contentsOf: backupURL),
-               var recovered = try? decoder.decode(AppData.self, from: backup) {
+               let recovered = try? decoder.decode(AppData.self, from: backup) {
                 try? backup.write(to: fileURL, options: .atomic)
-                if !recovered.didSeedFirstRun && recovered.mainTask == nil && recovered.today.isEmpty {
-                    return AppData.firstRun
-                }
-                recovered.didSeedFirstRun = true
-                return recovered
+                return normalized(recovered)
             }
             try? data.write(to: unreadableURL, options: .atomic)
             return AppData()
         }
-        if !decoded.didSeedFirstRun && decoded.mainTask == nil && decoded.today.isEmpty {
-            return AppData.firstRun
-        }
-        decoded.didSeedFirstRun = true
-        return decoded
+        return normalized(decoded)
     }
 
     public func save(_ value: AppData) throws {
@@ -76,5 +73,14 @@ public final class DataStore {
         try MarkdownExporter.render(value, date: date, calendar: calendar)
             .write(to: url, atomically: true, encoding: .utf8)
         return url
+    }
+
+    private func normalized(_ loaded: AppData) -> AppData {
+        var loaded = loaded
+        if !loaded.didSeedFirstRun && loaded.mainTask == nil && loaded.today.isEmpty {
+            return AppData.firstRun
+        }
+        loaded.didSeedFirstRun = true
+        return loaded
     }
 }

@@ -1,6 +1,6 @@
 # Sidetrack
 
-![Sidetrack icon](Assets/Sidetrack-icon-source.png)
+![Sidetrack’s dark, paper-soft focus view: “edit the wireframe video until the first ninety seconds feel inevitable,” a vague timer, three quiet steps, and today’s thoughts.](Docs/Sidetrack-product-portrait.png)
 
 Sidetrack is a quiet second-screen focus display for macOS. One sentence holds the center. Everything else waits in the margin.
 
@@ -61,7 +61,7 @@ Sidetrack never uses the network. Runtime data lives at:
 ~/Library/Application Support/Sidetrack/sidetrack.json
 ```
 
-The file is pretty-printed JSON. Sidetrack keeps the prior good write beside it as `sidetrack.previous.json`; unreadable data is preserved as `sidetrack.unreadable.json` instead of being silently discarded.
+The file is pretty-printed JSON. Sidetrack keeps the prior good write beside it as `sidetrack.previous.json`; if the primary file disappears or becomes unreadable, the backup restores it. Unreadable source data is preserved as `sidetrack.unreadable.json` instead of being silently discarded.
 
 At day change, Sidetrack writes the previous day to:
 
@@ -82,7 +82,7 @@ Scripts/test.sh
 Scripts/build-app.sh
 ```
 
-Built app appears at `build/Sidetrack.app`. Build uses `swiftc` directly so no full Xcode install is required.
+The unpacked app appears at `build/Sidetrack.app`; a clean signed install archive appears beside it as `build/Sidetrack.app.zip`. Build uses `swiftc` directly so no full Xcode install is required.
 
 ## Performance
 
@@ -92,7 +92,7 @@ Measured in full-screen on a 1920 × 1080 logical second display after the curre
 
 - `0.0%` CPU between minute updates; one brief redraw on the minute, then the process sleeps again
 - roughly `7–11 MB` resident memory after settling
-- `478 KB` executable; `3.1 MB` installed app bundle including font and icon
+- `492 KB` executable; `3.1 MB` installed app bundle including font and icon
 
 The compact layout survived 40 rapid resizes across 900 × 600, 1000 × 700, 1200 × 760, 1440 × 900, and 1920 × 1049. A separate burst of 202 timer and counter actions completed in under one second without a lost write or damaged backup.
 
