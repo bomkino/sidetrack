@@ -20,13 +20,14 @@ Read `README.md`, `PHILOSOPHY.md`, then `Docs/design-reference.png`.
 - Main thought and all later thoughts support one level of subthoughts.
 - Checks, promotion, contextual right-click actions, native undo, timer reset, copy-bank fresh-day reset, bottom-up reminders, daily distraction increment/decrement, embedded hover hotkeys, seven-day history, manual Markdown export, and automatic midnight/next-launch day archives implemented.
 - Compact layout verified from 900 × 600 upward. Main copy wraps and fits down, right-column subthoughts hide first, timer instructions own their vertical space, and resize invalidation prevents stale or clipped canvases after display changes.
-- Local writes are atomic with a rolling readable backup; unreadable JSON is preserved. Repeated same-day archives receive collision-safe suffixes instead of overwriting earlier pages.
-- Full screen verified on second display at 1920×1080 logical / 3840×2160 physical.
-- Last verification: `Sidetrack checks passed: 157`; 40 rapid cross-size resizes, a 202-action input burst, long wrapped editing, focus/paused spacing, preferences, data recovery, archive collisions, icon resolution, and full-screen launch verified.
+- Local writes are atomic with a rolling readable backup; a missing or unreadable primary recovers automatically, and unreadable source JSON is preserved. Save/export failures keep the page intact and explain the local write problem. Repeated same-day archives receive collision-safe suffixes instead of overwriting earlier pages.
+- Full-screen launch now uses a bounded, transition-aware retry instead of one brittle delayed toggle. It is verified on the remembered second display at 1920×1080 logical / 3840×2160 physical.
+- Last verification: `Sidetrack checks passed: 159`; 40 rapid cross-size resizes, a 202-action input burst, long wrapped editing, focus/paused spacing, preferences, missing/corrupt data recovery, archive collisions, icon resolution, and full-screen launch verified.
 - Settled idle: 0.0% CPU between minute redraws; about 7–11 MB RSS in full screen.
 - App icon source: `Assets/Sidetrack-icon-source.png`.
-- Built app: `build/Sidetrack.app`.
-- Installed app: `/Applications/Sidetrack.app`, version 1.1.0 (build 2), 3.1 MB, ad-hoc signature verified. The running app exposes the full multi-resolution icon and launches full-screen on the remembered second display.
+- GitHub product portrait: `Docs/Sidetrack-product-portrait.png`; 2400 × 1350, fictional task data, no private user content.
+- Built app: `build/Sidetrack.app`; use `build/Sidetrack.app.zip` for installation because the synced workspace can decorate unpacked bundle folders with unrelated Finder icon metadata after signing.
+- Installed app: `/Applications/Sidetrack.app`, version 1.1.1 (build 3) after the final installation step, 3.1 MB, ad-hoc signature verified. The running app exposes the full multi-resolution icon and launches full-screen on the remembered second display.
 - Public repository: `https://github.com/bomkino/sidetrack`; branch and release state must be checked live.
 
 ## Finish next

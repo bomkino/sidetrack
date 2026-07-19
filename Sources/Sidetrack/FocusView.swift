@@ -35,6 +35,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private var editor: RitualTextField?
     private var editorTarget: EditorTarget?
     private var preferencesController: PreferencesController?
+    private var hasShownSaveFailure = false
 
     private var mainRect = NSRect.zero
     private var newTaskRect = NSRect.zero
@@ -106,7 +107,18 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     func save() {
-        try? store.save(data)
+        do {
+            try store.save(data)
+            hasShownSaveFailure = false
+        } catch {
+            guard !hasShownSaveFailure, let window, window.attachedSheet == nil else { return }
+            hasShownSaveFailure = true
+            showWriteFailure(
+                title: "This change is not saved yet.",
+                explanation: "Nothing on the page was cleared. Check that Sidetrack can write to its local folder, then try once more.",
+                error: error
+            )
+        }
     }
 
     func addTask() {
@@ -173,7 +185,15 @@ final class FocusView: NSView, NSTextFieldDelegate {
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let self, let url = panel.url else { return }
             let markdown = MarkdownExporter.render(self.data)
-            try? markdown.write(to: url, atomically: true, encoding: .utf8)
+            do {
+                try markdown.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                self.showWriteFailure(
+                    title: "The Markdown page could not be saved.",
+                    explanation: "Your day is still here in Sidetrack. Choose another folder or check the folder’s permissions, then try again.",
+                    error: error
+                )
+            }
             window.makeFirstResponder(self)
         }
     }
@@ -346,6 +366,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         if mainRect.contains(point) {
             showContextMenu([
                 ("Rewrite main thought", "main-edit"),
+                ("Add a step", "main-add-sub"),
                 ("Move to later, checked", "main-complete"),
                 ("Delete main thought", "main-delete")
             ], event: event)
@@ -401,10 +422,18 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func showArchiveFailure(_ error: Error) {
-        guard let window else { return }
+        showWriteFailure(
+            title: "The day could not be saved.",
+            explanation: "Nothing was cleared. Check that Sidetrack can write to its local folder, then try again.",
+            error: error
+        )
+    }
+
+    private func showWriteFailure(title: String, explanation: String, error: Error) {
+        guard let window, window.attachedSheet == nil else { return }
         let alert = NSAlert()
-        alert.messageText = "The day could not be saved."
-        alert.informativeText = "Nothing was cleared. Check that Sidetrack can write to its local folder, then try again.\n\n\(error.localizedDescription)"
+        alert.messageText = title
+        alert.informativeText = "\(explanation)\n\n\(error.localizedDescription)"
         alert.addButton(withTitle: "Stay Here")
         alert.alertStyle = .warning
         alert.beginSheetModal(for: window)
@@ -500,6 +529,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let mainWidth: CGFloat
         let mainY: CGFloat
         let mainFontSize: CGFloat
+        let mainPlaceholderFontSize: CGFloat
         let mainTitleHeight: CGFloat
         let drift: NSPoint
     }
@@ -521,11 +551,12 @@ final class FocusView: NSView, NSTextFieldDelegate {
             : data.mainTask?.title ?? CopyBank.mainPrompt(index: data.copyIndex)
         let hasWrittenMain = data.mainTask != nil || editingTitle?.isEmpty == false
         let baseFontSize = min(64, max(34, bounds.width * 0.032))
+        let placeholderFontSize = min(42, max(32, bounds.width * 0.023))
         let maximumTitleHeight = min(230, max(118, bounds.height * 0.27))
         let mainFontSize = hasWrittenMain
             ? fittedMainFontSize(title, width: mainWidth - 34, maximum: baseFontSize, height: maximumTitleHeight)
             : baseFontSize
-        let titleFont = hasWrittenMain ? Typography.roman(mainFontSize) : Typography.italic(28)
+        let titleFont = hasWrittenMain ? Typography.roman(mainFontSize) : Typography.italic(placeholderFontSize)
         let titleHeight = min(
             textHeight(title, width: mainWidth - 34, font: titleFont, lineHeight: 0.94),
             maximumTitleHeight
@@ -544,6 +575,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
             mainWidth: mainWidth,
             mainY: mainY,
             mainFontSize: mainFontSize,
+            mainPlaceholderFontSize: placeholderFontSize,
             mainTitleHeight: titleHeight,
             drift: drift
         )
@@ -587,10 +619,15 @@ final class FocusView: NSView, NSTextFieldDelegate {
             }
             context.restoreGState()
         } else {
-            mainRect = NSRect(x: g.mainX + 34, y: y, width: g.mainWidth - 34, height: 70)
+            mainRect = NSRect(
+                x: g.mainX + 34,
+                y: y,
+                width: g.mainWidth - 34,
+                height: max(70, g.mainTitleHeight + 8)
+            )
             if editorTarget != .main {
                 drawText(CopyBank.mainPrompt(index: data.copyIndex), in: mainRect,
-                         font: Typography.italic(28), color: Palette.quiet,
+                         font: Typography.italic(g.mainPlaceholderFontSize), color: Palette.quiet,
                          tracking: -0.15, lineHeight: 1)
             }
         }
@@ -798,12 +835,26 @@ final class FocusView: NSView, NSTextFieldDelegate {
         field.isEditable = true
         field.isSelectable = true
         field.focusRingType = .none
-        field.placeholderString = placeholder(for: target)
-        if target == .main, data.mainTask == nil {
+        let prompt = placeholder(for: target)
+        field.placeholderString = prompt
+        if !prompt.isEmpty {
+            let placeholderFont: NSFont
+            switch target {
+            case .main:
+                placeholderFont = Typography.italic(makeGeometry().mainPlaceholderFontSize)
+            case .newTask:
+                placeholderFont = Typography.italic(16)
+            case .newSubtask:
+                placeholderFont = Typography.italic(15)
+            case .newSideSubtask:
+                placeholderFont = Typography.italic(13)
+            case .side, .subtask, .sideSubtask:
+                placeholderFont = editorFont(for: target)
+            }
             field.placeholderAttributedString = NSAttributedString(
-                string: placeholder(for: target),
+                string: prompt,
                 attributes: [
-                    .font: Typography.italic(28),
+                    .font: placeholderFont,
                     .foregroundColor: Palette.quiet
                 ]
             )

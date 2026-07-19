@@ -152,18 +152,18 @@ public struct AppData: Codable, Equatable {
             mainTask: TaskItem(
                 title: "edit wireframe video…",
                 subtasks: [
-                    Subtask(title: "watch the latest render once, without touching it"),
-                    Subtask(title: "write down where attention wanders"),
-                    Subtask(title: "make one clean pass")
+                    Subtask(title: "watch once without touching the timeline"),
+                    Subtask(title: "notice where the feeling slips away"),
+                    Subtask(title: "make one quiet pass")
                 ]
             ),
             today: [
                 TaskItem(
                     title: "listen once with eyes closed",
-                    subtasks: [Subtask(title: "notice where the rhythm slips")]
+                    subtasks: [Subtask(title: "leave a note where the rhythm breaks")]
                 ),
-                TaskItem(title: "write the next move down"),
-                TaskItem(title: "leave one clear note for tomorrow")
+                TaskItem(title: "write tomorrow’s first move"),
+                TaskItem(title: "leave one clean thing for morning")
             ]
         )
     }
