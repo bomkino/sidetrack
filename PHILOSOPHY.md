@@ -12,6 +12,8 @@ The timer’s language stays literal because a control should not make you inter
 
 The distraction clicker is not a score. A tap means only: “I noticed.” Past counts remain available without streaks, graphs, goals, judgment, or celebration.
 
+Small windows do not become little dashboards. Sidetrack keeps the same hierarchy, lets the sentence breathe across more lines, and quietly removes secondary detail before it compresses the work into noise.
+
 Everything stays on the Mac. At day change, a plain Markdown memory is written locally; the page itself changes only when you choose a fresh start. The app asks for no identity and sends nothing away.
 
 This shape will not fit every ADHD or ADD brain. It was made for one kind of restless attention, then released freely in the hope that it may feel kind to another.

@@ -3,11 +3,11 @@ import Foundation
 public enum CopyBank {
     public static let main = [
         "edit wireframe video…",
-        "what deserves the whole of you?",
+        "what needs your eyes now?",
         "make the next clear thing.",
-        "begin where the resistance is softest.",
+        "start with the part you can touch.",
         "what would feel quietly finished?",
-        "name the one honest thing."
+        "leave one clean thing behind."
     ]
 
     private static let later = [

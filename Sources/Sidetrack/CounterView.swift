@@ -3,7 +3,12 @@ import QuartzCore
 import SidetrackCore
 
 final class CounterView: NSView {
-    var count = 0 { didSet { needsDisplay = true } }
+    var count = 0 {
+        didSet {
+            setAccessibilityValue(count)
+            needsDisplay = true
+        }
+    }
     var onIncrement: (() -> Void)?
     var onDecrement: (() -> Void)?
     var history: (() -> [(label: String, count: Int)])?
@@ -19,6 +24,11 @@ final class CounterView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Distractions today")
+        setAccessibilityHelp("Press to count one distraction. Press U to undo a count.")
+        setAccessibilityValue(count)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -70,18 +80,22 @@ final class CounterView: NSView {
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
+    override func accessibilityPerformPress() -> Bool {
+        onIncrement?()
+        return true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if hovered {
             drawText("−", in: minusRect, font: Typography.roman(15), color: Palette.quiet)
             drawKeyWords([
-                ("Distraction", "D"), ("Undo count", "U"), ("New thought", "N"),
-                ("Subthought", "S"), ("rEwrite", "E"), ("checK step", "K"), ("Promote", "P")
+                ("Distraction", "D"), ("Undo", "U"),
+                ("New thought", "N"), ("rEwrite", "E")
             ], in: NSRect(x: 105, y: 2, width: bounds.width - 105, height: 22))
             drawKeyWords([
-                ("Complete", "C"), ("sTart · hold", "T"), ("Reset day", "R"),
-                ("rhYthm", "Y"), ("Markdown", "M"), ("Archive", "A"),
-                ("Options", "O"), ("Full screen", "F")
+                ("Timer", "T"), ("Promote", "P"),
+                ("Reset day", "R"), ("Full screen", "F")
             ], in: NSRect(x: 105, y: 23, width: bounds.width - 105, height: 22))
         }
         drawText(
@@ -117,7 +131,7 @@ final class CounterView: NSView {
                   let keyIndex = text[wordRange].firstIndex(of: key) else { continue }
             let offset = text.distance(from: text.startIndex, to: keyIndex)
             attributed.addAttributes([
-                .foregroundColor: Palette.ochre,
+                .foregroundColor: Palette.paper,
                 .font: Typography.roman(12)
             ], range: NSRange(location: offset, length: 1))
             searchStart = wordRange.upperBound

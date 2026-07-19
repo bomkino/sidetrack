@@ -17,6 +17,7 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 ## What it does
 
 - Opens full-screen on the last-used display.
+- Adapts cleanly down to a 900 × 600 window: the main sentence reflows and scales, while low-priority subthoughts step out before the page becomes crowded.
 - Holds one editable main thought plus one level of subthoughts.
 - Lets later thoughts and their subthoughts gather upward from the bottom margin.
 - Runs a manual `50 / 12 / 50 / 12 / 50 / 30` focus rhythm.
@@ -46,7 +47,7 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - `A` — reveal automatically saved days
 - `O` or `,` — preferences
 - `F` or `⌃⌘F` — enter or leave full screen
-- `⌘Z` — undo deletion or reset
+- `⌘Z` — undo checking, promotion, deletion, or reset
 
 When focus finishes, `B` begins the break and `K` keeps working. When a break finishes, `S` starts focus and `N` waits.
 
@@ -60,11 +61,15 @@ Sidetrack never uses the network. Runtime data lives at:
 ~/Library/Application Support/Sidetrack/sidetrack.json
 ```
 
-The file is pretty-printed JSON. At day change, Sidetrack writes the previous day to:
+The file is pretty-printed JSON. Sidetrack keeps the prior good write beside it as `sidetrack.previous.json`; unreadable data is preserved as `sidetrack.unreadable.json` instead of being silently discarded.
+
+At day change, Sidetrack writes the previous day to:
 
 ```text
 ~/Library/Application Support/Sidetrack/Days/YYYY-MM-DD.md
 ```
+
+Starting fresh twice never overwrites the first page; later copies receive `-2`, `-3`, and so on.
 
 Press `A` to reveal that folder. Manual export uses a normal macOS save panel and creates a plain `.md` file wherever you choose.
 
@@ -81,13 +86,15 @@ Built app appears at `build/Sidetrack.app`. Build uses `swiftc` directly so no f
 
 ## Performance
 
-Sidetrack is native AppKit with custom event-driven drawing. No continuous render loop exists. Clock, vague timer, and pixel drift redraw once per minute; edits redraw on input.
+Sidetrack is native AppKit with custom event-driven drawing. No continuous render loop exists. Clock, vague timer, and pixel drift redraw once per minute; edits and window changes redraw on input. An idle minute does not touch the data file.
 
-Measured in full-screen on a 4K second display after the current polish pass:
+Measured in full-screen on a 1920 × 1080 logical second display after the current polish pass:
 
-- `0.00s` additional CPU consumed across a 20-second settled idle sample
-- roughly `10 MB` resident memory after settling
-- `457 KB` executable; `3.1 MB` signed app bundle including font and icon
+- `0.0%` CPU between minute updates; one brief redraw on the minute, then the process sleeps again
+- roughly `7–11 MB` resident memory after settling
+- `478 KB` executable; `3.1 MB` installed app bundle including font and icon
+
+The compact layout survived 40 rapid resizes across 900 × 600, 1000 × 700, 1200 × 760, 1440 × 900, and 1920 × 1049. A separate burst of 202 timer and counter actions completed in under one second without a lost write or damaged backup.
 
 ## Freedom
 

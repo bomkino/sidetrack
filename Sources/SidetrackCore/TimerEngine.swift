@@ -75,7 +75,7 @@ public enum TimerEngine {
     }
 
     public static func resetDurationIfIdle(_ timer: inout FocusTimer, settings: PomodoroSettings) {
-        guard timer.status == .idle || timer.status == .paused else { return }
+        guard timer.status == .idle else { return }
         timer.remainingSeconds = duration(for: timer.phase, settings: settings)
         timer.endsAt = nil
     }

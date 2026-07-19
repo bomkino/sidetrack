@@ -34,7 +34,6 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private let counterView = CounterView(frame: .zero)
     private var editor: RitualTextField?
     private var editorTarget: EditorTarget?
-    private var originalEditorText = ""
     private var preferencesController: PreferencesController?
 
     private var mainRect = NSRect.zero
@@ -70,6 +69,14 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     required init?(coder: NSCoder) { nil }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        guard changed else { return }
+        needsLayout = true
+        needsDisplay = true
+    }
+
     override func layout() {
         super.layout()
         let geometry = makeGeometry()
@@ -95,7 +102,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let event = refreshTimer()
         timerView.update(timer: data.timer, settings: data.settings, gentle: event != .none)
         needsDisplay = true
-        save()
+        if event != .none { save() }
     }
 
     func save() {
@@ -128,10 +135,11 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     func completeMain() {
         guard var main = data.mainTask else { return }
+        var next = data
         main.isCompleted = true
-        data.today.insert(main, at: 0)
-        data.mainTask = nil
-        changed()
+        next.today.insert(main, at: 0)
+        next.mainTask = nil
+        replaceData(next, actionName: "Complete Main Thought")
     }
 
     func incrementDistraction() {
@@ -192,7 +200,12 @@ final class FocusView: NSView, NSTextFieldDelegate {
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn, let self else { return }
             var next = self.data
-            _ = try? self.store.archive(next, for: Date())
+            do {
+                try self.store.archive(next, for: Date())
+            } catch {
+                self.showArchiveFailure(error)
+                return
+            }
             next.mainTask = nil
             next.today = []
             next.distractionsByDay.removeValue(forKey: DistractionLog.key())
@@ -221,17 +234,17 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let key = event.charactersIgnoringModifiers?.lowercased()
         if data.timer.status == .awaitingWorkChoice, key == "b" {
             TimerEngine.takeBreak(&data.timer, settings: data.settings)
-            changed(gentle: true)
+            changed()
             return
         }
         if data.timer.status == .awaitingWorkChoice, key == "k" {
             TimerEngine.keepWorking(&data.timer)
-            changed(gentle: true)
+            changed()
             return
         }
         if data.timer.status == .awaitingBreakChoice, key == "s" {
             TimerEngine.startAgain(&data.timer, settings: data.settings)
-            changed(gentle: true)
+            changed()
             return
         }
         if data.timer.status == .awaitingBreakChoice, key == "n" { return }
@@ -317,13 +330,17 @@ final class FocusView: NSView, NSTextFieldDelegate {
         }
         for (taskID, check, title, _) in sideRects
         where check.insetBy(dx: -6, dy: -6).contains(point) || title.contains(point) {
-            showContextMenu([
-                ("Bring forward", "side-promote:\(taskID)"),
+            let task = data.today.first(where: { $0.id == taskID })
+            var choices = [
                 ("Rewrite thought", "side-edit:\(taskID)"),
                 ("Add a subthought", "side-add-sub:\(taskID)"),
                 ("Check or uncheck", "side-toggle:\(taskID)"),
                 ("Delete thought", "side-delete:\(taskID)")
-            ], event: event)
+            ]
+            if task?.isCompleted == false {
+                choices.insert(("Bring forward", "side-promote:\(taskID)"), at: 0)
+            }
+            showContextMenu(choices, event: event)
             return
         }
         if mainRect.contains(point) {
@@ -334,13 +351,42 @@ final class FocusView: NSView, NSTextFieldDelegate {
             ], event: event)
             return
         }
-        var items = [("Hold a thought", "new-thought"), ("Start or hold the rhythm", "timer-toggle")]
+        var items = [("Add a thought", "new-thought")]
         if data.mainTask != nil { items.insert(("Add a step", "main-add-sub"), at: 1) }
-        items.append(("Reset the rhythm", "timer-reset"))
+        items.append(contentsOf: timerContextChoices())
+        items.append(("Reset timer", "timer-reset"))
         items.append(("Begin a fresh day…", "fresh-day"))
         items.append(("Export this day…", "export-day"))
         items.append(("Show saved days", "saved-days"))
         showContextMenu(items, event: event)
+    }
+
+    private func timerContextChoices() -> [(String, String)] {
+        switch (data.timer.phase, data.timer.status) {
+        case (_, .idle):
+            return [("Begin \(data.settings.workMinutes)-minute focus", "timer-toggle")]
+        case (.work, .running):
+            return [("Pause focus", "timer-toggle")]
+        case (.work, .paused):
+            return [("Resume focus", "timer-toggle")]
+        case (.shortBreak, .running):
+            return [("Pause short break", "timer-toggle")]
+        case (.shortBreak, .paused):
+            return [("Resume short break", "timer-toggle")]
+        case (.longBreak, .running):
+            return [("Pause long break", "timer-toggle")]
+        case (.longBreak, .paused):
+            return [("Resume long break", "timer-toggle")]
+        case (_, .awaitingWorkChoice):
+            let longBreak = data.timer.completedCyclesInSet + 1 >= data.settings.cyclesPerSet
+            let minutes = longBreak ? data.settings.longBreakMinutes : data.settings.breakMinutes
+            return [
+                ("Begin \(minutes)-minute break", "timer-break"),
+                ("Keep working", "timer-keep-working")
+            ]
+        case (_, .awaitingBreakChoice):
+            return [("Start \(data.settings.workMinutes)-minute focus", "timer-start-focus")]
+        }
     }
 
     private func showContextMenu(_ choices: [(String, String)], event: NSEvent) {
@@ -354,6 +400,16 @@ final class FocusView: NSView, NSTextFieldDelegate {
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
+    private func showArchiveFailure(_ error: Error) {
+        guard let window else { return }
+        let alert = NSAlert()
+        alert.messageText = "The day could not be saved."
+        alert.informativeText = "Nothing was cleared. Check that Sidetrack can write to its local folder, then try again.\n\n\(error.localizedDescription)"
+        alert.addButton(withTitle: "Stay Here")
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window)
+    }
+
     @objc private func contextAction(_ sender: NSMenuItem) {
         guard let command = sender.representedObject as? String else { return }
         if command == "main-edit" { editMain(); return }
@@ -361,6 +417,21 @@ final class FocusView: NSView, NSTextFieldDelegate {
         if command == "new-thought" { addTask(); return }
         if command == "main-add-sub" { addSubtask(); return }
         if command == "timer-toggle" { toggleTimer(); return }
+        if command == "timer-break" {
+            TimerEngine.takeBreak(&data.timer, settings: data.settings)
+            changed()
+            return
+        }
+        if command == "timer-keep-working" {
+            TimerEngine.keepWorking(&data.timer)
+            changed()
+            return
+        }
+        if command == "timer-start-focus" {
+            TimerEngine.startAgain(&data.timer, settings: data.settings)
+            changed()
+            return
+        }
         if command == "timer-reset" { resetTimer(); return }
         if command == "fresh-day" { startFreshDay(); return }
         if command == "export-day" { exportDay(); return }
@@ -429,31 +500,51 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let mainWidth: CGFloat
         let mainY: CGFloat
         let mainFontSize: CGFloat
+        let mainTitleHeight: CGFloat
         let drift: NSPoint
     }
 
     private func makeGeometry() -> Geometry {
         let inset = max(62, bounds.width * 0.072)
-        let sideWidth = min(350, max(270, bounds.width * 0.19))
+        let sideWidth = min(350, max(240, bounds.width * 0.19))
         let shift = BurnInShift.offset()
         let drift = NSPoint(x: shift.x, y: shift.y)
         let sideX = bounds.width - inset - sideWidth + drift.x
-        let mainX = max(inset + 34, bounds.width * 0.115) + drift.x
-        let mainWidth = min(max(500, bounds.width * 0.455), max(500, sideX - mainX - 100))
-        let mainY = max(180, bounds.height * 0.305) + drift.y
-        let mainFontSize = min(62, max(44, bounds.width * 0.032))
-        let title = data.mainTask?.title ?? CopyBank.mainPrompt(index: data.copyIndex)
-        let titleFont = data.mainTask == nil ? Typography.italic(28) : Typography.roman(mainFontSize)
-        let titleHeight = textHeight(title, width: mainWidth - 34, font: titleFont, lineHeight: 0.94)
+        let mainX = max(inset + 22, bounds.width * 0.135) + drift.x
+        let availableMainWidth = max(360, sideX - mainX - 76)
+        let mainWidth = min(max(390, bounds.width * 0.46), availableMainWidth)
+        let compactVerticalLift: CGFloat = bounds.height < 720 ? 12 : 0
+        let mainY = max(138, bounds.height * 0.30 - compactVerticalLift) + drift.y
+        let editingTitle = editorTarget == .main ? editor?.stringValue : nil
+        let title = editingTitle?.isEmpty == false
+            ? editingTitle!
+            : data.mainTask?.title ?? CopyBank.mainPrompt(index: data.copyIndex)
+        let hasWrittenMain = data.mainTask != nil || editingTitle?.isEmpty == false
+        let baseFontSize = min(64, max(34, bounds.width * 0.032))
+        let maximumTitleHeight = min(230, max(118, bounds.height * 0.27))
+        let mainFontSize = hasWrittenMain
+            ? fittedMainFontSize(title, width: mainWidth - 34, maximum: baseFontSize, height: maximumTitleHeight)
+            : baseFontSize
+        let titleFont = hasWrittenMain ? Typography.roman(mainFontSize) : Typography.italic(28)
+        let titleHeight = min(
+            textHeight(title, width: mainWidth - 34, font: titleFont, lineHeight: 0.94),
+            maximumTitleHeight
+        )
         return Geometry(
             inset: inset,
             sideX: sideX,
             sideWidth: sideWidth,
-            timer: NSRect(x: mainX + 34, y: mainY + titleHeight + 20, width: mainWidth - 34, height: 54),
+            timer: NSRect(
+                x: mainX + 34,
+                y: mainY + titleHeight + 20,
+                width: mainWidth - 34,
+                height: TimerView.layoutHeight
+            ),
             mainX: mainX,
             mainWidth: mainWidth,
             mainY: mainY,
             mainFontSize: mainFontSize,
+            mainTitleHeight: titleHeight,
             drift: drift
         )
     }
@@ -465,19 +556,24 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
         if let main = data.mainTask {
             let context = NSGraphicsContext.current!.cgContext
-            let titleHeight = textHeight(main.title, width: g.mainWidth - 34,
-                                         font: Typography.roman(fontSize), lineHeight: 0.94)
-            mainRect = NSRect(x: g.mainX + 34, y: y, width: g.mainWidth - 34, height: max(64, titleHeight + 8))
+            mainRect = NSRect(
+                x: g.mainX + 34,
+                y: y,
+                width: g.mainWidth - 34,
+                height: max(64, g.mainTitleHeight + 8)
+            )
             if editorTarget != .main {
                 drawText(main.title, in: mainRect,
                          font: Typography.roman(fontSize), color: Palette.paper,
                          tracking: -0.48, lineHeight: 0.94)
             }
 
-            var subY = min(g.timer.maxY + 22, bounds.height - 205)
+            var subY = min(g.timer.maxY + TimerView.followingContentGap, bounds.height - 205)
+            let subtaskBottom = bounds.height - g.inset - 42
             context.saveGState()
             if data.timer.status == .running { context.setAlpha(0.30) }
             for subtask in main.subtasks.prefix(7) {
+                guard subY + 28 <= subtaskBottom else { break }
                 let check = NSRect(x: g.mainX + 35, y: subY + 5, width: 11, height: 11)
                 let title = NSRect(x: g.mainX + 59, y: subY, width: g.mainWidth - 67, height: 28)
                 drawCheck(in: check, checked: subtask.isCompleted)
@@ -508,7 +604,10 @@ final class FocusView: NSView, NSTextFieldDelegate {
         drawText(TimeLanguage.dayPhase(displayedDate),
                  in: NSRect(x: g.sideX, y: headingY, width: g.sideWidth, height: 30),
                  font: Typography.italic(19), color: Palette.quiet, tracking: 0.03)
-        drawText("\(TimeLanguage.dateLine(displayedDate))  ·  \(TimeLanguage.clockPhrase(displayedDate))",
+        let date = g.sideWidth < 280
+            ? TimeLanguage.compactDateLine(displayedDate)
+            : TimeLanguage.dateLine(displayedDate)
+        drawText("\(date)  ·  \(TimeLanguage.clockPhrase(displayedDate))",
                  in: NSRect(x: g.sideX, y: headingY + 30, width: g.sideWidth, height: 26),
                  font: Typography.roman(12), color: Palette.faint, tracking: 0.12)
 
@@ -538,8 +637,9 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
         let topLimit = headingY + 92
         var cursor = newTaskRect.minY - 24
+        let visibleSideSubtasks = bounds.width < 1100 ? 0 : (bounds.height < 720 ? 1 : 3)
         for task in data.today.reversed() {
-            let visibleSubtasks = Array(task.subtasks.prefix(3))
+            let visibleSubtasks = Array(task.subtasks.prefix(visibleSideSubtasks))
             let blockHeight = CGFloat(38 + visibleSubtasks.count * 27)
             let y = cursor - blockHeight
             guard y >= topLimit else { break }
@@ -579,17 +679,17 @@ final class FocusView: NSView, NSTextFieldDelegate {
         timerView.onTakeBreak = { [weak self] in
             guard let self else { return }
             TimerEngine.takeBreak(&self.data.timer, settings: self.data.settings)
-            self.changed(gentle: true)
+            self.changed()
         }
         timerView.onKeepWorking = { [weak self] in
             guard let self else { return }
             TimerEngine.keepWorking(&self.data.timer)
-            self.changed(gentle: true)
+            self.changed()
         }
         timerView.onStartAgain = { [weak self] in
             guard let self else { return }
             TimerEngine.startAgain(&self.data.timer, settings: self.data.settings)
-            self.changed(gentle: true)
+            self.changed()
         }
     }
 
@@ -646,40 +746,44 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func toggleSubtask(_ id: UUID) {
-        guard var main = data.mainTask,
+        var next = data
+        guard var main = next.mainTask,
               let index = main.subtasks.firstIndex(where: { $0.id == id }) else { return }
         main.subtasks[index].isCompleted.toggle()
         main.isCompleted = !main.subtasks.isEmpty && main.subtasks.allSatisfy(\.isCompleted)
         if main.isCompleted {
-            data.today.insert(main, at: 0)
-            data.mainTask = nil
+            next.today.insert(main, at: 0)
+            next.mainTask = nil
         } else {
-            data.mainTask = main
+            next.mainTask = main
         }
-        changed()
+        replaceData(next, actionName: "Check Step")
     }
 
     private func toggleSide(_ id: UUID) {
-        guard let index = data.today.firstIndex(where: { $0.id == id }) else { return }
-        data.today[index].isCompleted.toggle()
-        changed()
+        var next = data
+        guard let index = next.today.firstIndex(where: { $0.id == id }) else { return }
+        next.today[index].isCompleted.toggle()
+        replaceData(next, actionName: "Check Thought")
     }
 
     private func toggleSideSubtask(taskID: UUID, subtaskID: UUID) {
-        guard let taskIndex = data.today.firstIndex(where: { $0.id == taskID }),
-              let subtaskIndex = data.today[taskIndex].subtasks.firstIndex(where: { $0.id == subtaskID }) else { return }
-        data.today[taskIndex].subtasks[subtaskIndex].isCompleted.toggle()
-        let subtasks = data.today[taskIndex].subtasks
-        data.today[taskIndex].isCompleted = !subtasks.isEmpty && subtasks.allSatisfy(\.isCompleted)
-        changed()
+        var next = data
+        guard let taskIndex = next.today.firstIndex(where: { $0.id == taskID }),
+              let subtaskIndex = next.today[taskIndex].subtasks.firstIndex(where: { $0.id == subtaskID }) else { return }
+        next.today[taskIndex].subtasks[subtaskIndex].isCompleted.toggle()
+        let subtasks = next.today[taskIndex].subtasks
+        next.today[taskIndex].isCompleted = !subtasks.isEmpty && subtasks.allSatisfy(\.isCompleted)
+        replaceData(next, actionName: "Check Subthought")
     }
 
     private func promote(at index: Int) {
-        let next = data.today.remove(at: index)
-        guard !next.isCompleted else { changed(); return }
-        if let current = data.mainTask { data.today.insert(current, at: 0) }
-        data.mainTask = next
-        changed(gentle: true)
+        guard data.today.indices.contains(index), !data.today[index].isCompleted else { return }
+        var replacement = data
+        let promoted = replacement.today.remove(at: index)
+        if let current = replacement.mainTask { replacement.today.insert(current, at: 0) }
+        replacement.mainTask = promoted
+        replaceData(replacement, actionName: "Bring Thought Forward")
     }
 
     private func beginEditing(_ target: EditorTarget, text: String) {
@@ -695,9 +799,20 @@ final class FocusView: NSView, NSTextFieldDelegate {
         field.isSelectable = true
         field.focusRingType = .none
         field.placeholderString = placeholder(for: target)
-        field.lineBreakMode = .byTruncatingTail
-        field.cell?.wraps = false
-        field.cell?.isScrollable = true
+        if target == .main, data.mainTask == nil {
+            field.placeholderAttributedString = NSAttributedString(
+                string: placeholder(for: target),
+                attributes: [
+                    .font: Typography.italic(28),
+                    .foregroundColor: Palette.quiet
+                ]
+            )
+        }
+        let wraps = target == .main
+        field.lineBreakMode = wraps ? .byWordWrapping : .byTruncatingTail
+        field.cell?.wraps = wraps
+        field.cell?.isScrollable = !wraps
+        field.cell?.usesSingleLineMode = !wraps
         field.onCommit = { [weak self] in self?.commitEditor() }
         field.onCancel = { [weak self] in self?.cancelEditor() }
         field.delegate = self
@@ -705,7 +820,9 @@ final class FocusView: NSView, NSTextFieldDelegate {
         field.action = #selector(commitEditorAction)
         editor = field
         editorTarget = target
-        originalEditorText = text
+        if target == .main {
+            field.font = Typography.roman(makeGeometry().mainFontSize)
+        }
         addSubview(field)
         field.frame = editorFrame(for: target, geometry: makeGeometry())
         needsDisplay = true
@@ -723,6 +840,14 @@ final class FocusView: NSView, NSTextFieldDelegate {
         commitEditor()
     }
 
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? RitualTextField,
+              editor === field, editorTarget == .main else { return }
+        field.font = Typography.roman(makeGeometry().mainFontSize)
+        needsLayout = true
+        needsDisplay = true
+    }
+
     private func commitEditor() {
         guard let field = editor, let target = editorTarget else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -733,7 +858,6 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     private func cancelEditor() {
         guard editor != nil else { return }
-        _ = originalEditorText
         finishEditor()
         window?.makeFirstResponder(self)
     }
@@ -742,7 +866,6 @@ final class FocusView: NSView, NSTextFieldDelegate {
         editor?.removeFromSuperview()
         editor = nil
         editorTarget = nil
-        originalEditorText = ""
         needsDisplay = true
     }
 
@@ -776,7 +899,21 @@ final class FocusView: NSView, NSTextFieldDelegate {
         guard let target else { return .zero }
         switch target {
         case .main:
-            return mainRect.insetBy(dx: -8, dy: -4)
+            let value = editor?.stringValue.isEmpty == false
+                ? editor!.stringValue
+                : placeholder(for: .main)
+            let height = textHeight(
+                value,
+                width: g.mainWidth - 18,
+                font: Typography.roman(g.mainFontSize),
+                lineHeight: 0.94
+            )
+            return NSRect(
+                x: g.mainX + 26,
+                y: g.mainY - 4,
+                width: g.mainWidth - 18,
+                height: max(70, height + 12)
+            )
         case .newTask:
             return NSRect(x: g.sideX, y: newTaskRect.minY - 4, width: g.sideWidth, height: 34)
         case .newSubtask:
@@ -797,7 +934,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     private func editorFont(for target: EditorTarget) -> NSFont {
         switch target {
-        case .main: return Typography.roman(min(62, max(43, bounds.width * 0.032)))
+        case .main: return Typography.roman(min(64, max(34, bounds.width * 0.032)))
         case .newTask, .side: return Typography.roman(16)
         case .newSubtask, .subtask: return Typography.roman(17)
         case .newSideSubtask, .sideSubtask: return Typography.italic(13)
@@ -822,5 +959,19 @@ final class FocusView: NSView, NSTextFieldDelegate {
             options: [.usesLineFragmentOrigin],
             attributes: [.font: font, .paragraphStyle: paragraph]
         ).height)
+    }
+
+    private func fittedMainFontSize(
+        _ text: String,
+        width: CGFloat,
+        maximum: CGFloat,
+        height: CGFloat
+    ) -> CGFloat {
+        var size = maximum
+        while size > 28,
+              textHeight(text, width: width, font: Typography.roman(size), lineHeight: 0.94) > height {
+            size -= 2
+        }
+        return size
     }
 }

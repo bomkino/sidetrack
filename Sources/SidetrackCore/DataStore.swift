@@ -3,6 +3,8 @@ import Foundation
 public final class DataStore {
     public let fileURL: URL
     public let daysDirectoryURL: URL
+    public let backupURL: URL
+    public let unreadableURL: URL
 
     public init(fileURL: URL? = nil, daysDirectoryURL: URL? = nil) {
         if let fileURL {
@@ -16,14 +18,28 @@ public final class DataStore {
         }
         self.daysDirectoryURL = daysDirectoryURL
             ?? self.fileURL.deletingLastPathComponent().appendingPathComponent("Days", isDirectory: true)
+        self.backupURL = self.fileURL.deletingPathExtension().appendingPathExtension("previous.json")
+        self.unreadableURL = self.fileURL.deletingPathExtension().appendingPathExtension("unreadable.json")
     }
 
     public func load() -> AppData {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let data = try? Data(contentsOf: fileURL),
-              var decoded = try? decoder.decode(AppData.self, from: data) else {
+        guard let data = try? Data(contentsOf: fileURL) else {
             return AppData.firstRun
+        }
+        guard var decoded = try? decoder.decode(AppData.self, from: data) else {
+            if let backup = try? Data(contentsOf: backupURL),
+               var recovered = try? decoder.decode(AppData.self, from: backup) {
+                try? backup.write(to: fileURL, options: .atomic)
+                if !recovered.didSeedFirstRun && recovered.mainTask == nil && recovered.today.isEmpty {
+                    return AppData.firstRun
+                }
+                recovered.didSeedFirstRun = true
+                return recovered
+            }
+            try? data.write(to: unreadableURL, options: .atomic)
+            return AppData()
         }
         if !decoded.didSeedFirstRun && decoded.mainTask == nil && decoded.today.isEmpty {
             return AppData.firstRun
@@ -40,13 +56,23 @@ public final class DataStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(value).write(to: fileURL, options: .atomic)
+        let encoded = try encoder.encode(value)
+        if let previous = try? Data(contentsOf: fileURL) {
+            try? previous.write(to: backupURL, options: .atomic)
+        }
+        try encoded.write(to: fileURL, options: .atomic)
     }
 
     @discardableResult
     public func archive(_ value: AppData, for date: Date, calendar: Calendar = .current) throws -> URL {
         try FileManager.default.createDirectory(at: daysDirectoryURL, withIntermediateDirectories: true)
-        let url = daysDirectoryURL.appendingPathComponent("\(DistractionLog.key(for: date, calendar: calendar)).md")
+        let stem = DistractionLog.key(for: date, calendar: calendar)
+        var url = daysDirectoryURL.appendingPathComponent("\(stem).md")
+        var copy = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = daysDirectoryURL.appendingPathComponent("\(stem)-\(copy).md")
+            copy += 1
+        }
         try MarkdownExporter.render(value, date: date, calendar: calendar)
             .write(to: url, atomically: true, encoding: .utf8)
         return url

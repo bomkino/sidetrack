@@ -16,6 +16,7 @@ calendar.timeZone = TimeZone(secondsFromGMT: 0)!
 let date = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 17, minute: 16))!
 expect(TimeLanguage.clock(date, calendar: calendar) == "Friday, quarter past five", "clock uses calm bucket")
 expect(TimeLanguage.dateLine(date, calendar: calendar) == "Friday, 17 July", "date has its own quiet line")
+expect(TimeLanguage.compactDateLine(date, calendar: calendar) == "Fri, 17 Jul", "compact windows keep the date readable")
 
 expect(TimeLanguage.timer(seconds: 25 * 60) == "~25 minutes left", "timer rounds to 25 minutes")
 expect(TimeLanguage.timer(seconds: 20 * 60) == "~20 minutes left", "timer stays approximate")
@@ -83,6 +84,12 @@ var resetTimer = FocusTimer(phase: .longBreak, status: .running, remainingSecond
 TimerEngine.reset(&resetTimer, settings: defaults)
 expect(resetTimer.phase == .work && resetTimer.status == .idle, "timer reset returns to idle work")
 expect(resetTimer.remainingSeconds == 50 * 60, "timer reset restores configured work duration")
+var pausedTimer = FocusTimer(status: .paused, remainingSeconds: 17 * 60)
+TimerEngine.resetDurationIfIdle(&pausedTimer, settings: PomodoroSettings(workMinutes: 60))
+expect(pausedTimer.remainingSeconds == 17 * 60, "preferences never reset a paused session")
+var idleTimer = FocusTimer(status: .idle, remainingSeconds: 50 * 60)
+TimerEngine.resetDurationIfIdle(&idleTimer, settings: PomodoroSettings(workMinutes: 60))
+expect(idleTimer.remainingSeconds == 60 * 60, "new duration applies while the timer is idle")
 
 let exported = MarkdownExporter.render(AppData.firstRun, date: date, calendar: calendar)
 expect(exported.contains("# Friday, 17 July 2026"), "Markdown export has day heading")
@@ -103,7 +110,21 @@ do {
     expect(archivedURL.lastPathComponent == "2026-07-17.md", "automatic archive uses a stable day filename")
     let archived = try String(contentsOf: archivedURL, encoding: .utf8)
     expect(archived.contains("# Friday, 17 July 2026"), "automatic archive writes readable Markdown")
+    let secondArchiveURL = try store.archive(expected, for: date, calendar: calendar)
+    expect(secondArchiveURL.lastPathComponent == "2026-07-17-2.md", "another fresh start preserves the earlier archive")
     expect(DistractionLog.date(forKey: "2026-07-17", calendar: calendar) == calendar.startOfDay(for: date), "stored day keys return to dates")
+
+    let newer = AppData(mainTask: TaskItem(title: "Make the second honest cut"))
+    try store.save(newer)
+    try Data("{not-json".utf8).write(to: store.fileURL, options: .atomic)
+    expect(store.load() == expected, "a damaged primary file recovers the previous readable state")
+    expect(store.load() == expected, "recovery restores the primary file on disk")
+
+    let damagedStore = DataStore(fileURL: testDirectory.appendingPathComponent("damaged.json"))
+    try Data("{still-not-json".utf8).write(to: damagedStore.fileURL, options: .atomic)
+    let safeEmpty = damagedStore.load()
+    expect(safeEmpty.mainTask == nil && safeEmpty.today.isEmpty, "unrecoverable data never becomes sample tasks")
+    expect(FileManager.default.fileExists(atPath: damagedStore.unreadableURL.path), "unreadable source data is preserved")
     try FileManager.default.removeItem(at: testDirectory)
 } catch {
     FileHandle.standardError.write(Data("FAIL: store check: \(error)\n".utf8))

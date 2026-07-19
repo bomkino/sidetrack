@@ -44,7 +44,7 @@ final class PreferencesController: NSWindowController {
         addRow("Break", field: breakField, value: settings.breakMinutes, suffix: "minutes", y: 202, to: content)
         addRow("Long break", field: longBreakField, value: settings.longBreakMinutes, suffix: "minutes", y: 164, to: content)
         addRow("Long break after", field: cyclesField, value: settings.cyclesPerSet, suffix: "cycles", y: 126, to: content)
-        addRow("Clock", field: clockField, value: settings.clockOffsetMinutes, suffix: "minutes ahead", y: 88, to: content)
+        addRow("Clock", field: clockField, value: settings.clockOffsetMinutes, suffix: "minute shift", y: 88, to: content)
         clockField.stringValue = settings.clockOffsetMinutes >= 0 ? "+\(settings.clockOffsetMinutes)" : "\(settings.clockOffsetMinutes)"
 
         chimeButton.frame = NSRect(x: 25, y: 42, width: 180, height: 24)
@@ -53,9 +53,12 @@ final class PreferencesController: NSWindowController {
         content.addSubview(chimeButton)
 
         let save = NSButton(title: "Done", target: self, action: #selector(saveAndClose))
-        save.bezelStyle = .rounded
+        save.isBordered = false
+        save.font = Typography.roman(14)
+        save.contentTintColor = Palette.paper
         save.keyEquivalent = "\r"
         save.frame = NSRect(x: 300, y: 22, width: 64, height: 30)
+        save.setAccessibilityLabel("Save preferences")
         content.addSubview(save)
     }
 
@@ -67,7 +70,13 @@ final class PreferencesController: NSWindowController {
         field.stringValue = String(value)
         field.alignment = .right
         field.font = .systemFont(ofSize: 13)
+        field.textColor = Palette.paper
+        field.backgroundColor = Palette.warmInk
+        field.drawsBackground = true
+        field.isBordered = false
+        field.focusRingType = .none
         field.frame = NSRect(x: 190, y: y - 1, width: 54, height: 25)
+        field.setAccessibilityLabel(title)
         view.addSubview(field)
 
         let suffixLabel = label(suffix, size: 12, color: Palette.quiet)
