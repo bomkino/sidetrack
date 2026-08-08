@@ -12,7 +12,12 @@ enum Palette {
 
     private static let grain = NSColor(patternImage: makeGrain())
 
-    static func drawBackground(in rect: NSRect) {
+    static func drawBackground(in rect: NSRect, oled: Bool = false) {
+        if oled {
+            NSColor.black.setFill()
+            rect.fill()
+            return
+        }
         background.setFill()
         rect.fill()
         let glow = NSGradient(colorsAndLocations:

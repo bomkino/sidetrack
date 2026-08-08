@@ -82,17 +82,17 @@ public enum TimeLanguage {
         case .idle:
             return "Ready  ·  \(settings.workMinutes)-minute focus"
         case .running where phase == .work:
-            return "Focus  ·  \(timer(seconds: seconds))"
+            return "Focus, underway  ·  \(timer(seconds: seconds))"
         case .paused where phase == .work:
             return "Focus paused  ·  \(timer(seconds: seconds))"
         case .running where phase == .shortBreak:
-            return "Short break  ·  \(timer(seconds: seconds))"
+            return "Short rest, underway  ·  \(timer(seconds: seconds))"
         case .running:
-            return "Long break  ·  \(timer(seconds: seconds))"
+            return "Long rest, underway  ·  \(timer(seconds: seconds))"
         case .paused where phase == .shortBreak:
-            return "Short break paused  ·  \(timer(seconds: seconds))"
+            return "Short rest paused  ·  \(timer(seconds: seconds))"
         case .paused:
-            return "Long break paused  ·  \(timer(seconds: seconds))"
+            return "Long rest paused  ·  \(timer(seconds: seconds))"
         case .awaitingWorkChoice, .awaitingBreakChoice:
             return ""
         }

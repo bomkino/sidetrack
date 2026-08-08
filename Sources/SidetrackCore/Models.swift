@@ -81,6 +81,100 @@ public struct PomodoroSettings: Codable, Equatable {
     }
 }
 
+/// Where Sidetrack should look for its quiet second-screen home.
+/// `left`, `right`, and `above` are relative to the Mac's primary display.
+public enum DisplayPlacement: String, Codable, Equatable {
+    case left
+    case right
+    case above
+    case remembered
+}
+
+/// The composition inside the chosen display. This is deliberately separate
+/// from the monitor's hardware rotation: an app can choose its layout, but it
+/// cannot rotate a connected monitor for the user.
+public enum DisplayOrientation: String, Codable, Equatable {
+    case vertical
+    case horizontal
+}
+
+public enum PanelSide: String, Codable, Equatable {
+    case left
+    case right
+}
+
+public struct DisplaySettings: Codable, Equatable {
+    public var placement: DisplayPlacement
+    public var orientation: DisplayOrientation
+    public var panelSide: PanelSide
+    public var oledDimEnabled: Bool
+    public var mainScale: Double
+    public var timerScale: Double
+    public var todayScale: Double
+    public var stepsScale: Double
+    public var dateScale: Double
+    public var counterScale: Double
+
+    public init(
+        placement: DisplayPlacement = .left,
+        orientation: DisplayOrientation = .vertical,
+        panelSide: PanelSide = .right,
+        oledDimEnabled: Bool = false,
+        mainScale: Double = 1,
+        timerScale: Double = 1,
+        todayScale: Double = 1,
+        stepsScale: Double = 1,
+        dateScale: Double = 1,
+        counterScale: Double = 1
+    ) {
+        self.placement = placement
+        self.orientation = orientation
+        self.panelSide = panelSide
+        self.oledDimEnabled = oledDimEnabled
+        self.mainScale = mainScale
+        self.timerScale = timerScale
+        self.todayScale = todayScale
+        self.stepsScale = stepsScale
+        self.dateScale = dateScale
+        self.counterScale = counterScale
+        normalize()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case placement, orientation, panelSide, oledDimEnabled
+        case mainScale, timerScale, todayScale, stepsScale, dateScale, counterScale
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            placement: try container.decodeIfPresent(DisplayPlacement.self, forKey: .placement) ?? .left,
+            orientation: try container.decodeIfPresent(DisplayOrientation.self, forKey: .orientation) ?? .vertical,
+            panelSide: try container.decodeIfPresent(PanelSide.self, forKey: .panelSide) ?? .right,
+            oledDimEnabled: try container.decodeIfPresent(Bool.self, forKey: .oledDimEnabled) ?? false,
+            mainScale: try container.decodeIfPresent(Double.self, forKey: .mainScale) ?? 1,
+            timerScale: try container.decodeIfPresent(Double.self, forKey: .timerScale) ?? 1,
+            todayScale: try container.decodeIfPresent(Double.self, forKey: .todayScale) ?? 1,
+            stepsScale: try container.decodeIfPresent(Double.self, forKey: .stepsScale) ?? 1,
+            dateScale: try container.decodeIfPresent(Double.self, forKey: .dateScale) ?? 1,
+            counterScale: try container.decodeIfPresent(Double.self, forKey: .counterScale) ?? 1
+        )
+    }
+
+    public mutating func normalize() {
+        mainScale = Self.clamp(mainScale)
+        timerScale = Self.clamp(timerScale)
+        todayScale = Self.clamp(todayScale)
+        stepsScale = Self.clamp(stepsScale)
+        dateScale = Self.clamp(dateScale)
+        counterScale = Self.clamp(counterScale)
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        min(max(value, 0.75), 1.35)
+    }
+}
+
 public enum TimerPhase: String, Codable, Equatable {
     case work
     case shortBreak
@@ -121,6 +215,7 @@ public struct AppData: Codable, Equatable {
     public var mainTask: TaskItem?
     public var today: [TaskItem]
     public var settings: PomodoroSettings
+    public var display: DisplaySettings
     public var timer: FocusTimer
     public var didSeedFirstRun: Bool
     public var distractionsByDay: [String: Int]
@@ -131,6 +226,7 @@ public struct AppData: Codable, Equatable {
         mainTask: TaskItem? = nil,
         today: [TaskItem] = [],
         settings: PomodoroSettings = PomodoroSettings(),
+        display: DisplaySettings = DisplaySettings(),
         timer: FocusTimer? = nil,
         didSeedFirstRun: Bool = true,
         distractionsByDay: [String: Int] = [:],
@@ -140,6 +236,7 @@ public struct AppData: Codable, Equatable {
         self.mainTask = mainTask
         self.today = today
         self.settings = settings
+        self.display = display
         self.timer = timer ?? FocusTimer(remainingSeconds: settings.workMinutes * 60)
         self.didSeedFirstRun = didSeedFirstRun
         self.distractionsByDay = distractionsByDay
@@ -152,7 +249,7 @@ public struct AppData: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case mainTask, today, settings, timer, didSeedFirstRun, distractionsByDay, activeDayKey, copyIndex
+        case mainTask, today, settings, display, timer, didSeedFirstRun, distractionsByDay, activeDayKey, copyIndex
     }
 
     public init(from decoder: Decoder) throws {
@@ -160,6 +257,7 @@ public struct AppData: Codable, Equatable {
         mainTask = try container.decodeIfPresent(TaskItem.self, forKey: .mainTask)
         today = try container.decodeIfPresent([TaskItem].self, forKey: .today) ?? []
         settings = try container.decodeIfPresent(PomodoroSettings.self, forKey: .settings) ?? PomodoroSettings()
+        display = try container.decodeIfPresent(DisplaySettings.self, forKey: .display) ?? DisplaySettings()
         timer = try container.decodeIfPresent(FocusTimer.self, forKey: .timer)
             ?? FocusTimer(remainingSeconds: settings.workMinutes * 60)
         didSeedFirstRun = try container.decodeIfPresent(Bool.self, forKey: .didSeedFirstRun) ?? false

@@ -8,6 +8,7 @@ final class TimerView: NSView {
 
     var timer = FocusTimer()
     var settings = PomodoroSettings()
+    var textScale: CGFloat = 1
     var onToggle: (() -> Void)?
     var onTakeBreak: (() -> Void)?
     var onKeepWorking: (() -> Void)?
@@ -29,9 +30,10 @@ final class TimerView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    func update(timer: FocusTimer, settings: PomodoroSettings, gentle: Bool = false) {
+    func update(timer: FocusTimer, settings: PomodoroSettings, scale: CGFloat = 1, gentle: Bool = false) {
         self.timer = timer
         self.settings = settings
+        self.textScale = scale
         if gentle {
             let transition = CATransition()
             transition.type = .fade
@@ -52,30 +54,48 @@ final class TimerView: NSView {
         switch timer.status {
         case .awaitingWorkChoice:
             let isLong = timer.completedCyclesInSet + 1 >= settings.cyclesPerSet
-            let minutes = isLong ? settings.longBreakMinutes : settings.breakMinutes
-            drawText("Focus finished  ·  Take a \(minutes)-minute break?",
+            let rest = isLong ? "long rest" : "short rest"
+            drawText("Focus finished  ·  take a \(rest)?",
                      in: NSRect(x: 0, y: 0, width: bounds.width, height: 27),
-                     font: Typography.italic(17), color: Palette.paper)
+                     font: Typography.italic(17 * textScale), color: Palette.paper)
             firstOption = NSRect(x: 0, y: 27, width: 92, height: 24)
             secondOption = NSRect(x: 98, y: 27, width: 112, height: 24)
-            drawOption("Begin break", key: "B", in: firstOption)
+            drawOption("Begin rest", key: "B", in: firstOption)
             drawOption("·  Keep working", key: "K", in: secondOption)
         case .awaitingBreakChoice:
-            drawText("Break finished  ·  Start a \(settings.workMinutes)-minute focus?",
+            drawText("Rest finished  ·  ready to focus again?",
                      in: NSRect(x: 0, y: 0, width: bounds.width, height: 27),
-                     font: Typography.italic(17), color: Palette.paper)
+                     font: Typography.italic(17 * textScale), color: Palette.paper)
             firstOption = NSRect(x: 0, y: 27, width: 86, height: 24)
             secondOption = NSRect(x: 92, y: 27, width: 70, height: 24)
             drawOption("Start focus", key: "S", in: firstOption)
             drawOption("·  Not yet", key: "N", in: secondOption)
         default:
-            drawText(statusLine(remaining: remaining),
-                     in: NSRect(x: 0, y: 0, width: bounds.width, height: 29),
-                     font: Typography.italic(17), color: Palette.quiet, tracking: 0.02)
+            drawStatusLine(statusLine(remaining: remaining), in: NSRect(x: 0, y: 0, width: bounds.width, height: 29))
             drawText(clickInstruction(),
                      in: NSRect(x: 0, y: 26, width: bounds.width, height: 22),
-                     font: Typography.roman(11), color: Palette.faint, tracking: 0.1)
+                     font: Typography.roman(11 * textScale), color: Palette.faint, tracking: 0.1)
         }
+    }
+
+    private func drawStatusLine(_ text: String, in rect: NSRect) {
+        let attributed = NSMutableAttributedString(
+            string: text,
+            attributes: [
+                .font: Typography.italic(17 * textScale),
+                .foregroundColor: Palette.quiet,
+                .kern: 0.02 * textScale
+            ]
+        )
+        if let separator = text.range(of: "  ·  ") {
+            let prefixLength = text.distance(from: text.startIndex, to: separator.lowerBound)
+            attributed.addAttribute(
+                .foregroundColor,
+                value: Palette.paper,
+                range: NSRange(location: 0, length: prefixLength)
+            )
+        }
+        attributed.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
     }
 
     private func statusLine(remaining: Int) -> String {
@@ -100,7 +120,7 @@ final class TimerView: NSView {
         let attributed = NSMutableAttributedString(
             string: text,
             attributes: [
-                .font: Typography.roman(13),
+                .font: Typography.roman(13 * textScale),
                 .foregroundColor: Palette.quiet
             ]
         )
@@ -118,12 +138,10 @@ final class TimerView: NSView {
         let remaining = TimerEngine.secondsRemaining(timer)
         switch timer.status {
         case .awaitingWorkChoice:
-            let longBreak = timer.completedCyclesInSet + 1 >= settings.cyclesPerSet
-            let minutes = longBreak ? settings.longBreakMinutes : settings.breakMinutes
-            setAccessibilityLabel("Focus finished. Take a \(minutes)-minute break?")
+            setAccessibilityLabel("Focus finished. Take a rest?")
             setAccessibilityHelp("Press B to begin the break or K to keep working.")
         case .awaitingBreakChoice:
-            setAccessibilityLabel("Break finished. Start a \(settings.workMinutes)-minute focus?")
+            setAccessibilityLabel("Rest finished. Ready to focus again?")
             setAccessibilityHelp("Press S to start focus or N to wait.")
         default:
             setAccessibilityLabel(statusLine(remaining: remaining))

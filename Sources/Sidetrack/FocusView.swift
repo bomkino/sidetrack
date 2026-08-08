@@ -36,6 +36,9 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private var editorTarget: EditorTarget?
     private var preferencesController: PreferencesController?
     private var hasShownSaveFailure = false
+    var onDisplaySettingsChange: ((DisplaySettings) -> Void)?
+
+    var displaySettings: DisplaySettings { data.display }
 
     private var mainRect = NSRect.zero
     private var newTaskRect = NSRect.zero
@@ -47,6 +50,15 @@ final class FocusView: NSView, NSTextFieldDelegate {
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
     override var acceptsFirstResponder: Bool { true }
+
+    private var oledDimActive: Bool {
+        data.display.oledDimEnabled && data.timer.status == .running
+    }
+
+    private var secondaryAlpha: CGFloat {
+        if oledDimActive { return 0.23 }
+        return data.timer.status == .running ? 0.30 : 1
+    }
 
     init(store: DataStore) {
         self.store = store
@@ -82,17 +94,19 @@ final class FocusView: NSView, NSTextFieldDelegate {
         super.layout()
         let geometry = makeGeometry()
         timerView.frame = geometry.timer
+        timerView.textScale = CGFloat(data.display.timerScale)
         counterView.frame = NSRect(
             x: max(54, bounds.width * 0.055) + geometry.drift.x,
             y: bounds.height - geometry.inset - 40 + geometry.drift.y,
             width: min(850, bounds.width * 0.68),
-            height: 50
+            height: 50 * CGFloat(data.display.counterScale)
         )
+        counterView.textScale = CGFloat(data.display.counterScale)
         editor?.frame = editorFrame(for: editorTarget, geometry: geometry)
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        Palette.drawBackground(in: bounds)
+        Palette.drawBackground(in: bounds, oled: oledDimActive)
         let g = makeGeometry()
         drawMain(g)
         drawToday(g)
@@ -101,7 +115,6 @@ final class FocusView: NSView, NSTextFieldDelegate {
     func minuteChanged() {
         _ = rollOverDayIfNeeded()
         let event = refreshTimer()
-        timerView.update(timer: data.timer, settings: data.settings, gentle: event != .none)
         needsDisplay = true
         if event != .none { save() }
     }
@@ -237,11 +250,13 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     func showPreferences() {
-        let controller = PreferencesController(settings: data.settings) { [weak self] settings in
+        let controller = PreferencesController(settings: data.settings, display: data.display) { [weak self] settings, display in
             guard let self else { return }
             self.data.settings = settings
+            self.data.display = display
             TimerEngine.resetDurationIfIdle(&self.data.timer, settings: settings)
             self.changed()
+            self.onDisplaySettingsChange?(display)
         }
         preferencesController = controller
         controller.showWindow(nil)
@@ -391,18 +406,18 @@ final class FocusView: NSView, NSTextFieldDelegate {
         case (.work, .paused):
             return [("Resume focus", "timer-toggle")]
         case (.shortBreak, .running):
-            return [("Pause short break", "timer-toggle")]
+            return [("Pause short rest", "timer-toggle")]
         case (.shortBreak, .paused):
-            return [("Resume short break", "timer-toggle")]
+            return [("Resume short rest", "timer-toggle")]
         case (.longBreak, .running):
-            return [("Pause long break", "timer-toggle")]
+            return [("Pause long rest", "timer-toggle")]
         case (.longBreak, .paused):
-            return [("Resume long break", "timer-toggle")]
+            return [("Resume long rest", "timer-toggle")]
         case (_, .awaitingWorkChoice):
             let longBreak = data.timer.completedCyclesInSet + 1 >= data.settings.cyclesPerSet
             let minutes = longBreak ? data.settings.longBreakMinutes : data.settings.breakMinutes
             return [
-                ("Begin \(minutes)-minute break", "timer-break"),
+                ("Begin \(minutes)-minute rest", "timer-break"),
                 ("Keep working", "timer-keep-working")
             ]
         case (_, .awaitingBreakChoice):
@@ -524,6 +539,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let inset: CGFloat
         let sideX: CGFloat
         let sideWidth: CGFloat
+        let sideHeadingY: CGFloat
         let timer: NSRect
         let mainX: CGFloat
         let mainWidth: CGFloat
@@ -531,28 +547,58 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let mainFontSize: CGFloat
         let mainPlaceholderFontSize: CGFloat
         let mainTitleHeight: CGFloat
+        let isVertical: Bool
         let drift: NSPoint
     }
 
     private func makeGeometry() -> Geometry {
-        let inset = max(62, bounds.width * 0.072)
-        let sideWidth = min(350, max(240, bounds.width * 0.19))
+        let isVertical = data.display.orientation == .vertical
+        let inset = isVertical
+            ? max(34, min(96, bounds.width * 0.062))
+            : max(62, bounds.width * 0.072)
+        let sideScale = CGFloat(data.display.todayScale)
+        let panelOnLeft = data.display.panelSide == .left
         let shift = BurnInShift.offset()
         let drift = NSPoint(x: shift.x, y: shift.y)
-        let sideX = bounds.width - inset - sideWidth + drift.x
-        let mainX = max(inset + 22, bounds.width * 0.135) + drift.x
-        let availableMainWidth = max(360, sideX - mainX - 76)
-        let mainWidth = min(max(390, bounds.width * 0.46), availableMainWidth)
-        let compactVerticalLift: CGFloat = bounds.height < 720 ? 12 : 0
-        let mainY = max(138, bounds.height * 0.30 - compactVerticalLift) + drift.y
+        let sideWidth: CGFloat
+        let sideX: CGFloat
+        let mainWidth: CGFloat
+        let mainX: CGFloat
+        let mainY: CGFloat
+        if isVertical {
+            mainWidth = min(bounds.width - inset * 2, max(320, bounds.width * 0.84))
+            mainX = (bounds.width - mainWidth) * 0.5 + drift.x
+            sideWidth = min(mainWidth * 0.70 * sideScale, bounds.width - inset * 2)
+            sideX = panelOnLeft
+                ? inset + drift.x
+                : bounds.width - inset - sideWidth + drift.x
+            mainY = max(88, bounds.height * 0.115) + drift.y
+        } else {
+            sideWidth = min(350 * sideScale, max(190, bounds.width * 0.19))
+            let gap = max(32, min(76, bounds.width * 0.05))
+            if panelOnLeft {
+                sideX = inset + drift.x
+                mainX = sideX + sideWidth + gap
+            } else {
+                mainX = max(inset + 22, bounds.width * 0.135) + drift.x
+                sideX = bounds.width - inset - sideWidth + drift.x
+            }
+            let availableMainWidth = max(250, bounds.width - (inset * 2) - sideWidth - gap)
+            mainWidth = min(max(320, bounds.width * 0.46), availableMainWidth)
+            let compactVerticalLift: CGFloat = bounds.height < 720 ? 12 : 0
+            mainY = max(138, bounds.height * 0.30 - compactVerticalLift) + drift.y
+        }
         let editingTitle = editorTarget == .main ? editor?.stringValue : nil
         let title = editingTitle?.isEmpty == false
             ? editingTitle!
             : data.mainTask?.title ?? CopyBank.mainPrompt(index: data.copyIndex)
         let hasWrittenMain = data.mainTask != nil || editingTitle?.isEmpty == false
-        let baseFontSize = min(64, max(34, bounds.width * 0.032))
-        let placeholderFontSize = min(42, max(32, bounds.width * 0.023))
-        let maximumTitleHeight = min(230, max(118, bounds.height * 0.27))
+        let mainScale = CGFloat(data.display.mainScale)
+        let baseFontSize = min(64 * mainScale, max(34 * mainScale, bounds.width * 0.032 * mainScale))
+        let placeholderFontSize = min(42 * mainScale, max(30 * mainScale, bounds.width * 0.023 * mainScale))
+        let maximumTitleHeight = isVertical
+            ? min(300, max(118, bounds.height * 0.24))
+            : min(230, max(118, bounds.height * 0.27))
         let mainFontSize = hasWrittenMain
             ? fittedMainFontSize(title, width: mainWidth - 34, maximum: baseFontSize, height: maximumTitleHeight)
             : baseFontSize
@@ -561,15 +607,22 @@ final class FocusView: NSView, NSTextFieldDelegate {
             textHeight(title, width: mainWidth - 34, font: titleFont, lineHeight: 0.94),
             maximumTitleHeight
         )
+        let timerHeight = TimerView.layoutHeight * CGFloat(data.display.timerScale)
+        let followingGap = TimerView.followingContentGap * max(0.9, CGFloat(data.display.timerScale))
+        let mainStepHeight = CGFloat(min(data.mainTask?.subtasks.count ?? 0, 7)) * 36 * CGFloat(data.display.stepsScale)
+        let sideHeadingY = isVertical
+            ? min(bounds.height * 0.72, mainY + titleHeight + 20 + timerHeight + followingGap + mainStepHeight + 34)
+            : max(inset + 36, bounds.height * 0.15) + drift.y
         return Geometry(
             inset: inset,
             sideX: sideX,
             sideWidth: sideWidth,
+            sideHeadingY: sideHeadingY,
             timer: NSRect(
                 x: mainX + 34,
                 y: mainY + titleHeight + 20,
                 width: mainWidth - 34,
-                height: TimerView.layoutHeight
+                height: timerHeight
             ),
             mainX: mainX,
             mainWidth: mainWidth,
@@ -577,6 +630,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
             mainFontSize: mainFontSize,
             mainPlaceholderFontSize: placeholderFontSize,
             mainTitleHeight: titleHeight,
+            isVertical: isVertical,
             drift: drift
         )
     }
@@ -600,22 +654,27 @@ final class FocusView: NSView, NSTextFieldDelegate {
                          tracking: -0.48, lineHeight: 0.94)
             }
 
-            var subY = min(g.timer.maxY + TimerView.followingContentGap, bounds.height - 205)
-            let subtaskBottom = bounds.height - g.inset - 42
+            let stepScale = CGFloat(data.display.stepsScale)
+            let followingGap = TimerView.followingContentGap * max(0.9, CGFloat(data.display.timerScale))
+            var subY = min(g.timer.maxY + followingGap, bounds.height - 205)
+            let subtaskBottom = g.isVertical
+                ? g.sideHeadingY - 22
+                : bounds.height - g.inset - 42
             context.saveGState()
-            if data.timer.status == .running { context.setAlpha(0.30) }
+            context.setAlpha(secondaryAlpha)
             for subtask in main.subtasks.prefix(7) {
-                guard subY + 28 <= subtaskBottom else { break }
-                let check = NSRect(x: g.mainX + 35, y: subY + 5, width: 11, height: 11)
-                let title = NSRect(x: g.mainX + 59, y: subY, width: g.mainWidth - 67, height: 28)
+                let rowHeight = 36 * stepScale
+                guard subY + rowHeight - 8 <= subtaskBottom else { break }
+                let check = NSRect(x: g.mainX + 35, y: subY + 5, width: 11 * stepScale, height: 11 * stepScale)
+                let title = NSRect(x: g.mainX + 59, y: subY, width: g.mainWidth - 67, height: 28 * stepScale)
                 drawCheck(in: check, checked: subtask.isCompleted)
                 if editorTarget != .subtask(subtask.id) {
-                    drawText(subtask.title, in: title, font: Typography.roman(17),
+                    drawText(subtask.title, in: title, font: Typography.roman(17 * stepScale),
                              color: subtask.isCompleted ? Palette.quiet : Palette.paper,
                              tracking: 0.02, strike: subtask.isCompleted)
                 }
                 subtaskRects.append((subtask.id, check, title))
-                subY += 36
+                subY += rowHeight
             }
             context.restoreGState()
         } else {
@@ -637,16 +696,19 @@ final class FocusView: NSView, NSTextFieldDelegate {
         sideRects.removeAll()
         sideSubtaskRects.removeAll()
         let displayedDate = TimeLanguage.adjusted(Date(), offsetMinutes: data.settings.clockOffsetMinutes)
-        let headingY = max(g.inset + 36, bounds.height * 0.15) + g.drift.y
+        let dateScale = CGFloat(data.display.dateScale)
+        let todayScale = CGFloat(data.display.todayScale)
+        let stepsScale = CGFloat(data.display.stepsScale)
+        let headingY = g.sideHeadingY
         drawText(TimeLanguage.dayPhase(displayedDate),
                  in: NSRect(x: g.sideX, y: headingY, width: g.sideWidth, height: 30),
-                 font: Typography.italic(19), color: Palette.quiet, tracking: 0.03)
+                 font: Typography.italic(19 * dateScale), color: Palette.quiet, tracking: 0.03)
         let date = g.sideWidth < 280
             ? TimeLanguage.compactDateLine(displayedDate)
             : TimeLanguage.dateLine(displayedDate)
         drawText("\(date)  ·  \(TimeLanguage.clockPhrase(displayedDate))",
                  in: NSRect(x: g.sideX, y: headingY + 30, width: g.sideWidth, height: 26),
-                 font: Typography.roman(12), color: Palette.faint, tracking: 0.12)
+                 font: Typography.roman(12 * dateScale), color: Palette.faint, tracking: 0.12)
 
         let rule = NSBezierPath()
         rule.move(to: NSPoint(x: g.sideX, y: headingY + 61))
@@ -659,17 +721,18 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
         let context = NSGraphicsContext.current!.cgContext
         context.saveGState()
-        if data.timer.status == .running { context.setAlpha(0.30) }
+        context.setAlpha(secondaryAlpha)
 
+        let counterClearance: CGFloat = data.display.panelSide == .left ? 68 : 0
         newTaskRect = NSRect(
             x: g.sideX,
-            y: bounds.height - g.inset - 28 + g.drift.y,
+            y: bounds.height - g.inset - 28 - counterClearance + g.drift.y,
             width: 165,
-            height: 30
+            height: 30 * todayScale
         )
         if editorTarget != .newTask {
             drawText("+   hold a thought", in: newTaskRect,
-                     font: Typography.italic(14), color: Palette.quiet, tracking: 0.02)
+                     font: Typography.italic(14 * todayScale), color: Palette.quiet, tracking: 0.02)
         }
 
         let topLimit = headingY + 92
@@ -677,34 +740,36 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let visibleSideSubtasks = bounds.width < 1100 ? 0 : (bounds.height < 720 ? 1 : 3)
         for task in data.today.reversed() {
             let visibleSubtasks = Array(task.subtasks.prefix(visibleSideSubtasks))
-            let blockHeight = CGFloat(38 + visibleSubtasks.count * 27)
+            let taskHeight = 38 * todayScale
+            let subtaskHeight = CGFloat(visibleSubtasks.count) * 27 * stepsScale
+            let blockHeight = taskHeight + subtaskHeight
             let y = cursor - blockHeight
             guard y >= topLimit else { break }
 
-            let check = NSRect(x: g.sideX, y: y + 5, width: 11, height: 11)
-            let title = NSRect(x: g.sideX + 24, y: y, width: g.sideWidth - 24, height: 34)
+            let check = NSRect(x: g.sideX, y: y + 5, width: 11 * todayScale, height: 11 * todayScale)
+            let title = NSRect(x: g.sideX + 24 * todayScale, y: y, width: g.sideWidth - 24 * todayScale, height: 34 * todayScale)
             drawCheck(in: check, checked: task.isCompleted)
             if editorTarget != .side(task.id) {
-                drawText(task.title, in: title, font: Typography.roman(16),
+                drawText(task.title, in: title, font: Typography.roman(16 * todayScale),
                          color: task.isCompleted ? Palette.quiet : Palette.paper,
                          tracking: 0.02, lineHeight: 1.06, strike: task.isCompleted)
             }
             sideRects.append((task.id, check, title, title))
 
-            var subY = y + 36
+            var subY = y + 36 * todayScale
             for subtask in visibleSubtasks {
-                let subCheck = NSRect(x: g.sideX + 24, y: subY + 4, width: 9, height: 9)
-                let subTitle = NSRect(x: g.sideX + 43, y: subY, width: g.sideWidth - 43, height: 27)
+                let subCheck = NSRect(x: g.sideX + 24 * todayScale, y: subY + 4, width: 9 * stepsScale, height: 9 * stepsScale)
+                let subTitle = NSRect(x: g.sideX + 43 * todayScale, y: subY, width: g.sideWidth - 43 * todayScale, height: 27 * stepsScale)
                 drawCheck(in: subCheck, checked: subtask.isCompleted)
                 if editorTarget != .sideSubtask(task.id, subtask.id) {
-                    drawText(subtask.title, in: subTitle, font: Typography.italic(13),
+                    drawText(subtask.title, in: subTitle, font: Typography.italic(13 * stepsScale),
                              color: Palette.quiet, tracking: 0.02,
                              lineHeight: 1.03, strike: subtask.isCompleted)
                 }
                 sideSubtaskRects.append((task.id, subtask.id, subCheck, subTitle))
-                subY += 27
+                subY += 27 * stepsScale
             }
-            cursor = y - 13
+            cursor = y - 13 * todayScale
         }
 
         preferencesRect = .zero
@@ -736,12 +801,14 @@ final class FocusView: NSView, NSTextFieldDelegate {
         if event != .none, data.settings.chimeEnabled {
             NSSound(named: NSSound.Name("Glass"))?.play()
         }
-        timerView.update(timer: data.timer, settings: data.settings, gentle: event != .none)
+        timerView.update(timer: data.timer, settings: data.settings,
+                         scale: CGFloat(data.display.timerScale), gentle: event != .none)
         return event
     }
 
     private func changed(gentle: Bool = false) {
-        timerView.update(timer: data.timer, settings: data.settings, gentle: gentle)
+        timerView.update(timer: data.timer, settings: data.settings,
+                         scale: CGFloat(data.display.timerScale), gentle: gentle)
         updateCounter()
         save()
         needsLayout = true
@@ -769,7 +836,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     private func updateCounter() {
         counterView.count = data.distractionsByDay[DistractionLog.key(), default: 0]
-        counterView.alphaValue = data.timer.status == .running ? 0.36 : 1
+        counterView.textScale = CGFloat(data.display.counterScale)
+        counterView.alphaValue = oledDimActive ? 0.22 : (data.timer.status == .running ? 0.36 : 1)
     }
 
     private func replaceData(_ replacement: AppData, actionName: String) {
@@ -843,11 +911,11 @@ final class FocusView: NSView, NSTextFieldDelegate {
             case .main:
                 placeholderFont = Typography.italic(makeGeometry().mainPlaceholderFontSize)
             case .newTask:
-                placeholderFont = Typography.italic(16)
+                placeholderFont = Typography.italic(16 * CGFloat(data.display.todayScale))
             case .newSubtask:
-                placeholderFont = Typography.italic(15)
+                placeholderFont = Typography.italic(15 * CGFloat(data.display.stepsScale))
             case .newSideSubtask:
-                placeholderFont = Typography.italic(13)
+                placeholderFont = Typography.italic(13 * CGFloat(data.display.stepsScale))
             case .side, .subtask, .sideSubtask:
                 placeholderFont = editorFont(for: target)
             }
@@ -985,10 +1053,12 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     private func editorFont(for target: EditorTarget) -> NSFont {
         switch target {
-        case .main: return Typography.roman(min(64, max(34, bounds.width * 0.032)))
-        case .newTask, .side: return Typography.roman(16)
-        case .newSubtask, .subtask: return Typography.roman(17)
-        case .newSideSubtask, .sideSubtask: return Typography.italic(13)
+        case .main:
+            let scale = CGFloat(data.display.mainScale)
+            return Typography.roman(min(64 * scale, max(34 * scale, bounds.width * 0.032 * scale)))
+        case .newTask, .side: return Typography.roman(16 * CGFloat(data.display.todayScale))
+        case .newSubtask, .subtask: return Typography.roman(17 * CGFloat(data.display.stepsScale))
+        case .newSideSubtask, .sideSubtask: return Typography.italic(13 * CGFloat(data.display.stepsScale))
         }
     }
 
