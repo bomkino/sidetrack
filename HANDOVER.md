@@ -32,6 +32,7 @@ Read `README.md`, `PHILOSOPHY.md`, then `Docs/design-reference.png`.
 - Built app: `build/Sidetrack.app`; use `build/Sidetrack.app.zip` for installation because the synced workspace can decorate unpacked bundle folders with unrelated Finder icon metadata after signing.
 - Installed app: `/Applications/Sidetrack.app`, version 1.2.0 (build 1), 3.2 MB, ad-hoc signature verified. Installed executable SHA-256: `d26e8ec6d097964de315ea7706b6f420b3509e6a7bb180c2a648c81597d8b043`, matching `build/Sidetrack.app`. The next launch should land full-screen on the left vertical display by default.
 - Public repository: `https://github.com/bomkino/sidetrack`; branch and release state must be checked live.
+- Latest merged release: `https://github.com/bomkino/sidetrack/releases/tag/v1.2.0`; `Sidetrack.app.zip` SHA-256 `441b263d76640c737dc1f68c6ae98e56441fe174858ac15bba3dfb92018d1c19`.
 
 ## Finish next
 
