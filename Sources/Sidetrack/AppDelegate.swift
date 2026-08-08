@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var fullScreenTransitioning = false
     private var launchFullScreenAttempts = 0
     private var launchActivationAttempts = 0
+    private var pendingDisplayScreen: NSScreen?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -49,11 +50,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         launchFullScreenPending = false
         fullScreenTransitioning = true
     }
-    func windowDidExitFullScreen(_ notification: Notification) { fullScreenTransitioning = false }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        fullScreenTransitioning = false
+        guard let target = pendingDisplayScreen else { return }
+        pendingDisplayScreen = nil
+        window.setFrame(target.visibleFrame, display: true, animate: false)
+        launchFullScreenAttempts = 0
+        launchActivationAttempts = 0
+        launchFullScreenPending = true
+        requestLaunchFullScreen(after: 0.35)
+    }
 
     private func buildWindow() {
         let store = DataStore()
         focusView = FocusView(store: store)
+        focusView.onDisplaySettingsChange = { [weak self] settings in
+            self?.moveToPreferredDisplay(for: settings)
+        }
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -70,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.minSize = NSSize(width: 900, height: 600)
         window.collectionBehavior = [.fullScreenPrimary]
 
-        let target = rememberedScreen() ?? NSScreen.screens.first(where: { $0 != NSScreen.main }) ?? NSScreen.main
+        let target = preferredScreen(for: focusView.displaySettings)
         if let target { window.setFrame(target.visibleFrame, display: true) }
         let backgroundQA = ProcessInfo.processInfo.environment["SIDETRACK_QA_BACKGROUND"] == "1"
         if backgroundQA {
@@ -209,6 +222,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let saved = UserDefaults.standard.integer(forKey: "displayID")
         return NSScreen.screens.first { screen in
             (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue == saved
+        }
+    }
+
+    private func preferredScreen(for settings: DisplaySettings) -> NSScreen? {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return nil }
+        let main = NSScreen.main ?? screens[0]
+        switch settings.placement {
+        case .remembered:
+            if let remembered = rememberedScreen() { return remembered }
+        case .left:
+            if let left = nearestScreen(
+                to: main,
+                candidates: screens.filter { $0 != main && $0.frame.maxX <= main.frame.minX + 1 },
+                horizontal: true
+            ) { return left }
+        case .right:
+            if let right = nearestScreen(
+                to: main,
+                candidates: screens.filter { $0 != main && $0.frame.minX >= main.frame.maxX - 1 },
+                horizontal: true
+            ) { return right }
+        case .above:
+            if let above = nearestScreen(
+                to: main,
+                candidates: screens.filter { $0 != main && $0.frame.minY >= main.frame.maxY - 1 },
+                horizontal: false
+            ) { return above }
+        }
+        return rememberedScreen() ?? screens.first(where: { $0 != main }) ?? main
+    }
+
+    private func nearestScreen(to main: NSScreen, candidates: [NSScreen], horizontal: Bool) -> NSScreen? {
+        candidates.min { lhs, rhs in
+            let lhsPrimary = horizontal
+                ? abs(lhs.frame.maxX - main.frame.minX)
+                : abs(lhs.frame.minY - main.frame.maxY)
+            let rhsPrimary = horizontal
+                ? abs(rhs.frame.maxX - main.frame.minX)
+                : abs(rhs.frame.minY - main.frame.maxY)
+            let lhsSecondary = horizontal
+                ? abs(lhs.frame.midY - main.frame.midY)
+                : abs(lhs.frame.midX - main.frame.midX)
+            let rhsSecondary = horizontal
+                ? abs(rhs.frame.midY - main.frame.midY)
+                : abs(rhs.frame.midX - main.frame.midX)
+            return lhsPrimary + lhsSecondary * 0.1 < rhsPrimary + rhsSecondary * 0.1
+        }
+    }
+
+    private func moveToPreferredDisplay(for settings: DisplaySettings) {
+        guard let target = preferredScreen(for: settings), let current = window.screen else { return }
+        guard current != target else { return }
+        if window.styleMask.contains(.fullScreen) {
+            pendingDisplayScreen = target
+            launchFullScreenPending = false
+            window.toggleFullScreen(nil)
+        } else {
+            window.setFrame(target.visibleFrame, display: true, animate: true)
+            window.makeKeyAndOrderFront(nil)
         }
     }
 

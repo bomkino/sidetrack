@@ -16,13 +16,16 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 
 ## What it does
 
-- Opens full-screen on the last-used display.
+- Opens full-screen on the chosen second display: left, right, above, or the last remembered screen.
+- Understands portrait and landscape compositions, and lets the Today panel live on either side without losing the main thought.
+- Gives each quiet layer its own bounded size control—main thought, rhythm, Today list, steps, date/time, and distraction count.
+- Offers OLED dim mode: when focus is running, the background becomes true black and the thought, rhythm, and time remain awake while everything else recedes.
 - Adapts cleanly down to a 900 × 600 window: the main sentence reflows and scales, while low-priority subthoughts step out before the page becomes crowded.
 - Holds one editable main thought plus one level of subthoughts.
 - Lets later thoughts and their subthoughts gather upward from the bottom margin.
 - Runs a manual `50 / 12 / 50 / 12 / 50 / 30` focus rhythm.
 - Fades secondary material during focus.
-- Uses stable, literal timer states—Ready, Focus, Focus paused, Short break, Long break—and always says what a click will do.
+- Uses stable, literal timer states—Ready, Focus underway, Focus paused, Short rest underway, Long rest underway—and always says what a click will do.
 - Speaks the date and time through changing light: dawn, twilight, moonlight, and the hours between.
 - Displays its clock 15 minutes ahead by default; the offset is editable in Preferences and never changes pomodoro timing.
 - Counts distractions with a tiny daily `0000` clicker; hover reveals a soft decrement and the keyboard map, while right-click shows seven days.
@@ -92,8 +95,8 @@ Sidetrack is native AppKit with custom event-driven drawing. No continuous rende
 Measured in full-screen on a 1920 × 1080 logical second display after the current polish pass:
 
 - `0.0%` CPU between minute updates; one brief redraw on the minute, then the process sleeps again
-- roughly `7–11 MB` resident memory after settling
-- `509 KB` executable; `3.2 MB` installed app bundle including font and icon
+- roughly `10–32 MB` resident memory after settling; on a 2160 × 3840 physical portrait display, macOS may retain about `90 MB` of physical footprint for the native full-screen backing surface, stable while idle rather than a growing allocation
+- `566 KB` executable; `3.2 MB` installed app bundle including font and icon
 
 The compact layout survived 40 rapid resizes across 900 × 600, 1000 × 700, 1200 × 760, 1440 × 900, and 1920 × 1049. A separate burst of 202 timer and counter actions completed in under one second without a lost write or damaged backup.
 
