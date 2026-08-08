@@ -37,7 +37,7 @@ Read `README.md`, `PHILOSOPHY.md`, then `Docs/design-reference.png`.
 - Installed app: `/Applications/Sidetrack.app`, version 1.4.0 (build 3), ad-hoc signature verified. Installed executable SHA-256: `6989f99a8db961c1285cfeefd0347ccc3891a3b2038546382a3aa49a8d11b23d`, matching `build/Sidetrack.app`. The prior 1.3.0 bundle is reversible at `/Applications/Sidetrack.app.previous-1.3.0`; the older 1.2.0 bundle remains at `/Applications/Sidetrack.app.previous`. The current launch lands full-screen on the left vertical display by default.
 - Public repository: `https://github.com/bomkino/sidetrack`; branch and release state must be checked live.
 - Current public main: commit `a451b5b` (`feat: whisper past forgotten timer phases`), pushed 8 August 2026.
-- Latest merged release: `https://github.com/bomkino/sidetrack/releases/tag/v1.2.0`; `Sidetrack.app.zip` SHA-256 `441b263d76640c737dc1f68c6ae98e56441fe174858ac15bba3dfb92018d1c19`.
+- Latest public release: `https://github.com/bomkino/sidetrack/releases/tag/v1.4.0`; `Sidetrack.app.zip` SHA-256 `379c7593c5859b204460720e72bd5dd4204ad249e48897ad7fed4c99ca950c2e`.
 
 ## Finish next
 
