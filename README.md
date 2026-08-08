@@ -17,7 +17,8 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 ## What it does
 
 - Opens full-screen on the chosen second display: left, right, above, or the last remembered screen.
-- Understands portrait and landscape compositions, and lets the Today panel live on either side without losing the main thought.
+- Uses a small editorial grid in portrait and landscape. The default vertical page gives Today and the distraction counter the top register, then anchors the focus sentence and rhythm lower down; the alternate main-first split remains available. The Today panel can live on either side, with balanced-edge, left-edge, right-edge, and swapped-order presets.
+- Preferences preview live as you change them; there is no save-and-guess loop.
 - Gives each quiet layer its own bounded size control—main thought, rhythm, Today list, steps, date/time, and distraction count.
 - Offers OLED dim mode: when focus is running, the background becomes true black and the thought, rhythm, and time remain awake while everything else recedes.
 - Adapts cleanly down to a 900 × 600 window: the main sentence reflows and scales, while low-priority subthoughts step out before the page becomes crowded.
@@ -29,6 +30,7 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - Speaks the date and time through changing light: dawn, twilight, moonlight, and the hours between.
 - Displays its clock 15 minutes ahead by default; the offset is editable in Preferences and never changes pomodoro timing.
 - Counts distractions with a tiny daily `0000` clicker; hover reveals a soft decrement and the keyboard map, while right-click shows seven days.
+- Keeps a short, persistent north star beside the clicker—20 characters, carried from day to day. Click it or press `G` to rewrite it.
 - Saves the finished day automatically as readable Markdown after midnight or on the next launch; manual export remains available.
 - Cycles through a small bank of human placeholders when you begin fresh.
 - Begins with an empty page rather than pretending a demo task belongs to you.
@@ -39,6 +41,7 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - `N` — add a new thought
 - `S` — add a subthought to the main thought
 - `E` — write over the main thought
+- `G` — write the small north star beside the distraction count
 - `T` or `Space` — start, pause, or resume the timer
 - `P` — promote the next thought
 - `K` — check the next main-task step
@@ -95,7 +98,7 @@ Sidetrack is native AppKit with custom event-driven drawing. No continuous rende
 Measured in full-screen on a 1920 × 1080 logical second display after the current polish pass:
 
 - `0.0%` CPU between minute updates; one brief redraw on the minute, then the process sleeps again
-- roughly `10–32 MB` resident memory after settling; on a 2160 × 3840 physical portrait display, macOS may retain about `90 MB` of physical footprint for the native full-screen backing surface, stable while idle rather than a growing allocation
+- roughly `44–55 MB` resident memory in the final windowed resize pass; on a 2160 × 3840 physical portrait display, macOS may retain about `90 MB` of physical footprint for the native full-screen backing surface, stable while idle rather than a growing allocation
 - `566 KB` executable; `3.2 MB` installed app bundle including font and icon
 
 The compact layout survived 40 rapid resizes across 900 × 600, 1000 × 700, 1200 × 760, 1440 × 900, and 1920 × 1049. A separate burst of 202 timer and counter actions completed in under one second without a lost write or damaged backup.

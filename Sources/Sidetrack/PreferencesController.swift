@@ -1,7 +1,7 @@
 import AppKit
 import SidetrackCore
 
-final class PreferencesController: NSWindowController {
+final class PreferencesController: NSWindowController, NSTextFieldDelegate {
     private let workField = NSTextField()
     private let breakField = NSTextField()
     private let longBreakField = NSTextField()
@@ -12,6 +12,8 @@ final class PreferencesController: NSWindowController {
     private let placementPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let orientationPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let panelSidePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let alignmentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let orderPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let mainScale = NSStepper()
     private let timerScale = NSStepper()
     private let todayScale = NSStepper()
@@ -19,16 +21,17 @@ final class PreferencesController: NSWindowController {
     private let dateScale = NSStepper()
     private let counterScale = NSStepper()
     private var scaleValueLabels: [ObjectIdentifier: NSTextField] = [:]
-    private let onSave: (PomodoroSettings, DisplaySettings) -> Void
+    private let onChange: (PomodoroSettings, DisplaySettings) -> Void
+    private var isConfiguring = true
 
     init(
         settings: PomodoroSettings,
         display: DisplaySettings,
-        onSave: @escaping (PomodoroSettings, DisplaySettings) -> Void
+        onChange: @escaping (PomodoroSettings, DisplaySettings) -> Void
     ) {
-        self.onSave = onSave
+        self.onChange = onChange
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 780),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -39,6 +42,7 @@ final class PreferencesController: NSWindowController {
         panel.level = .floating
         super.init(window: panel)
         configure(settings, display: display)
+        isConfiguring = false
     }
 
     required init?(coder: NSCoder) { nil }
@@ -49,75 +53,88 @@ final class PreferencesController: NSWindowController {
         content.layer?.backgroundColor = Palette.background.cgColor
 
         let title = label("A rhythm, chosen once", size: 20, color: Palette.paper)
-        title.frame = NSRect(x: 28, y: 635, width: 440, height: 28)
+        title.frame = NSRect(x: 28, y: 735, width: 500, height: 28)
         content.addSubview(title)
 
-        let note = label("The page stays quiet. You decide when anything begins.", size: 12, color: Palette.quiet)
-        note.frame = NSRect(x: 28, y: 611, width: 460, height: 20)
+        let note = label("The page stays quiet. Change a choice; it follows immediately.", size: 12, color: Palette.quiet)
+        note.frame = NSRect(x: 28, y: 711, width: 500, height: 20)
         content.addSubview(note)
 
-        addSection("Rhythm", y: 575, to: content)
-        addRow("Focus", field: workField, value: settings.workMinutes, suffix: "minutes", y: 540, to: content)
-        addRow("Short rest", field: breakField, value: settings.breakMinutes, suffix: "minutes", y: 508, to: content)
-        addRow("Long rest", field: longBreakField, value: settings.longBreakMinutes, suffix: "minutes", y: 476, to: content)
-        addRow("Long rest after", field: cyclesField, value: settings.cyclesPerSet, suffix: "cycles", y: 444, to: content)
-        addRow("Clock shift", field: clockField, value: settings.clockOffsetMinutes, suffix: "minutes", y: 412, to: content)
+        addSection("Rhythm", y: 674, to: content)
+        addRow("Focus", field: workField, value: settings.workMinutes, suffix: "minutes", y: 639, to: content)
+        addRow("Short rest", field: breakField, value: settings.breakMinutes, suffix: "minutes", y: 607, to: content)
+        addRow("Long rest", field: longBreakField, value: settings.longBreakMinutes, suffix: "minutes", y: 575, to: content)
+        addRow("Long rest after", field: cyclesField, value: settings.cyclesPerSet, suffix: "cycles", y: 543, to: content)
+        addRow("Clock shift", field: clockField, value: settings.clockOffsetMinutes, suffix: "minutes", y: 511, to: content)
         clockField.stringValue = settings.clockOffsetMinutes >= 0 ? "+\(settings.clockOffsetMinutes)" : "\(settings.clockOffsetMinutes)"
 
-        chimeButton.frame = NSRect(x: 25, y: 374, width: 210, height: 24)
+        chimeButton.frame = NSRect(x: 25, y: 473, width: 210, height: 24)
         chimeButton.state = settings.chimeEnabled ? .on : .off
+        chimeButton.target = self
+        chimeButton.action = #selector(preferenceChanged(_:))
         chimeButton.contentTintColor = Palette.quiet
         chimeButton.font = Typography.roman(12)
         chimeButton.setAccessibilityLabel("One soft chime")
         content.addSubview(chimeButton)
 
-        addSection("Second screen", y: 338, to: content)
+        addSection("Second screen", y: 437, to: content)
         addPopupRow("Screen", popup: placementPopup,
                     items: [("Left of main", DisplayPlacement.left.rawValue),
                             ("Right of main", DisplayPlacement.right.rawValue),
                             ("Above main", DisplayPlacement.above.rawValue),
                             ("Remember last screen", DisplayPlacement.remembered.rawValue)],
-                    selected: display.placement.rawValue, y: 304, to: content)
+                    selected: display.placement.rawValue, y: 403, to: content)
         addPopupRow("Orientation", popup: orientationPopup,
                     items: [("Vertical", DisplayOrientation.vertical.rawValue),
                             ("Horizontal", DisplayOrientation.horizontal.rawValue)],
-                    selected: display.orientation.rawValue, y: 272, to: content)
+                    selected: display.orientation.rawValue, y: 371, to: content)
         addPopupRow("Today list", popup: panelSidePopup,
                     items: [("On the right", PanelSide.right.rawValue),
                             ("On the left", PanelSide.left.rawValue)],
-                    selected: display.panelSide.rawValue, y: 240, to: content)
+                    selected: display.panelSide.rawValue, y: 339, to: content)
+        addPopupRow("Alignment", popup: alignmentPopup,
+                    items: [("Balanced edges", ContentAlignment.center.rawValue),
+                            ("Left edge", ContentAlignment.left.rawValue),
+                            ("Right edge", ContentAlignment.right.rawValue)],
+                    selected: display.alignment.rawValue, y: 307, to: content)
+        addPopupRow("Order", popup: orderPopup,
+                    items: [("Main thought first", PanelOrder.mainFirst.rawValue),
+                            ("Today list first", PanelOrder.todayFirst.rawValue)],
+                    selected: display.panelOrder.rawValue, y: 275, to: content)
 
-        oledButton.frame = NSRect(x: 25, y: 202, width: 330, height: 24)
+        oledButton.frame = NSRect(x: 25, y: 235, width: 330, height: 24)
         oledButton.state = display.oledDimEnabled ? .on : .off
+        oledButton.target = self
+        oledButton.action = #selector(preferenceChanged(_:))
         oledButton.contentTintColor = Palette.quiet
         oledButton.font = Typography.roman(12)
         oledButton.setAccessibilityLabel("OLED dim mode while focus runs")
         content.addSubview(oledButton)
         let oledNote = label("Black as night; the thought, rhythm, and time stay awake.", size: 11, color: Palette.faint)
-        oledNote.frame = NSRect(x: 28, y: 181, width: 450, height: 18)
+        oledNote.frame = NSRect(x: 28, y: 214, width: 500, height: 18)
         content.addSubview(oledNote)
 
-        addSection("A little more / a little less", y: 145, to: content)
+        addSection("A little more / a little less", y: 178, to: content)
         addScalePair("Main thought", stepper: mainScale, value: display.mainScale,
-                     "Rhythm", stepper: timerScale, value: display.timerScale, y: 111, to: content)
+                     "Rhythm", stepper: timerScale, value: display.timerScale, y: 144, to: content)
         addScalePair("Today list", stepper: todayScale, value: display.todayScale,
-                     "Steps", stepper: stepsScale, value: display.stepsScale, y: 79, to: content)
+                     "Steps", stepper: stepsScale, value: display.stepsScale, y: 112, to: content)
         addScalePair("Date & time", stepper: dateScale, value: display.dateScale,
-                     "Distraction count", stepper: counterScale, value: display.counterScale, y: 47, to: content)
+                     "Distraction count", stepper: counterScale, value: display.counterScale, y: 80, to: content)
 
         let save = NSButton(title: "Done", target: self, action: #selector(saveAndClose))
         save.isBordered = false
         save.font = Typography.roman(14)
         save.contentTintColor = Palette.paper
         save.keyEquivalent = "\r"
-        save.frame = NSRect(x: 432, y: 13, width: 64, height: 30)
+        save.frame = NSRect(x: 472, y: 13, width: 64, height: 30)
         save.setAccessibilityLabel("Save preferences")
         content.addSubview(save)
     }
 
     private func addSection(_ title: String, y: CGFloat, to view: NSView) {
         let heading = label(title, size: 11, color: Palette.faint)
-        heading.frame = NSRect(x: 28, y: y, width: 460, height: 18)
+        heading.frame = NSRect(x: 28, y: y, width: 500, height: 18)
         view.addSubview(heading)
     }
 
@@ -134,6 +151,7 @@ final class PreferencesController: NSWindowController {
         field.drawsBackground = true
         field.isBordered = false
         field.focusRingType = .none
+        field.delegate = self
         field.frame = NSRect(x: 190, y: y - 1, width: 54, height: 25)
         field.setAccessibilityLabel(title)
         view.addSubview(field)
@@ -160,7 +178,9 @@ final class PreferencesController: NSWindowController {
         if let index = items.firstIndex(where: { $0.1 == selected }) { popup.selectItem(at: index) }
         popup.font = Typography.roman(12)
         popup.contentTintColor = Palette.paper
-        popup.frame = NSRect(x: 190, y: y - 3, width: 290, height: 28)
+        popup.target = self
+        popup.action = #selector(preferenceChanged(_:))
+        popup.frame = NSRect(x: 190, y: y - 3, width: 340, height: 28)
         popup.setAccessibilityLabel(title)
         view.addSubview(popup)
     }
@@ -199,6 +219,7 @@ final class PreferencesController: NSWindowController {
 
     @objc private func scaleChanged(_ sender: NSStepper) {
         scaleValueLabels[ObjectIdentifier(sender)]?.stringValue = Self.scaleLabel(sender.doubleValue)
+        emitChange()
     }
 
     private static func scaleLabel(_ value: Double) -> String {
@@ -212,7 +233,19 @@ final class PreferencesController: NSWindowController {
         return field
     }
 
-    @objc private func saveAndClose() {
+    @objc private func preferenceChanged(_ sender: Any?) {
+        emitChange()
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        emitChange()
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        emitChange()
+    }
+
+    private func currentValues() -> (PomodoroSettings, DisplaySettings) {
         var settings = PomodoroSettings(
             workMinutes: workField.integerValue,
             breakMinutes: breakField.integerValue,
@@ -227,6 +260,8 @@ final class PreferencesController: NSWindowController {
             placement: DisplayPlacement(rawValue: placementPopup.selectedItem?.representedObject as? String ?? "left") ?? .left,
             orientation: DisplayOrientation(rawValue: orientationPopup.selectedItem?.representedObject as? String ?? "vertical") ?? .vertical,
             panelSide: PanelSide(rawValue: panelSidePopup.selectedItem?.representedObject as? String ?? "right") ?? .right,
+            alignment: ContentAlignment(rawValue: alignmentPopup.selectedItem?.representedObject as? String ?? "center") ?? .center,
+            panelOrder: PanelOrder(rawValue: orderPopup.selectedItem?.representedObject as? String ?? "mainFirst") ?? .mainFirst,
             oledDimEnabled: oledButton.state == .on,
             mainScale: mainScale.doubleValue,
             timerScale: timerScale.doubleValue,
@@ -236,7 +271,17 @@ final class PreferencesController: NSWindowController {
             counterScale: counterScale.doubleValue
         )
         display.normalize()
-        onSave(settings, display)
+        return (settings, display)
+    }
+
+    private func emitChange() {
+        guard !isConfiguring else { return }
+        let values = currentValues()
+        onChange(values.0, values.1)
+    }
+
+    @objc private func saveAndClose() {
+        emitChange()
         close()
     }
 }

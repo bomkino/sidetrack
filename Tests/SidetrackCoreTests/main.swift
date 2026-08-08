@@ -30,11 +30,17 @@ expect(TimeLanguage.rhythmLine(phase: .longBreak, status: .running, seconds: 30 
 expect(CopyBank.mainPrompt(index: 0) == "what are you returning to?", "first placeholder offers a quiet way back in")
 expect(CopyBank.mainPrompt(index: CopyBank.next(0)) != CopyBank.mainPrompt(index: 0), "fresh day advances the copy bank")
 expect(AppData.firstRun.mainTask == nil && AppData.firstRun.today.isEmpty, "first launch begins as the user’s empty page")
+expect(AppData.firstRun.oneThing.isEmpty, "One Thing begins as a quiet invitation")
+expect(CopyBank.oneThingPrompt(index: 0) == "a small north star", "One Thing has a human placeholder")
 
 let late = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 23, minute: 50))!
 let offsetLate = TimeLanguage.adjusted(late, offsetMinutes: 15)
 expect(TimeLanguage.dateLine(offsetLate, calendar: calendar) == "Saturday, 18 July", "+15 display clock crosses midnight calmly")
 expect(TimeLanguage.clockPhrase(offsetLate, calendar: calendar) == "twelve o’clock", "offset clock uses the adjusted day")
+let ten = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 10))!
+expect(TimeLanguage.dayPhase(ten, calendar: calendar) == "morning", "ten o’clock still belongs to morning")
+let midday = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: 12))!
+expect(TimeLanguage.dayPhase(midday, calendar: calendar) == "midday", "midday stays plain and readable")
 
 for hour in 0..<24 {
     let phased = calendar.date(from: DateComponents(year: 2026, month: 7, day: 17, hour: hour))!
@@ -83,12 +89,18 @@ let displayDefaults = DisplaySettings()
 expect(displayDefaults.placement == .left, "default second screen is left of main")
 expect(displayDefaults.orientation == .vertical, "default composition is vertical")
 expect(displayDefaults.panelSide == .right, "default Today list stays on the right")
+expect(displayDefaults.alignment == .center, "default text alignment uses balanced edges")
+expect(displayDefaults.panelOrder == .todayFirst, "default page gives Today and the counter the top register")
+expect(displayDefaults.dateScale > 1 && displayDefaults.timerScale > 1, "default time is comfortably larger than the old baseline")
 var oversizedDisplay = DisplaySettings(mainScale: 9, timerScale: 0.1, todayScale: 2, stepsScale: -1, dateScale: 1.8, counterScale: 0.2)
 oversizedDisplay.normalize()
 expect(oversizedDisplay.mainScale == 1.35 && oversizedDisplay.timerScale == 0.75, "component scales stay inside their calm bounds")
 expect(oversizedDisplay.stepsScale == 0.75 && oversizedDisplay.dateScale == 1.35, "all component scales normalize")
 let legacyAppData = try! JSONDecoder().decode(AppData.self, from: Data("{\"today\":[],\"settings\":{}}".utf8))
 expect(legacyAppData.display == DisplaySettings(), "older day files receive display defaults")
+let oldDisplay = try! JSONDecoder().decode(DisplaySettings.self, from: Data("{\"placement\":\"left\",\"orientation\":\"vertical\",\"panelSide\":\"right\",\"oledDimEnabled\":false,\"mainScale\":1,\"timerScale\":1,\"todayScale\":1,\"stepsScale\":1,\"dateScale\":1,\"counterScale\":1}".utf8))
+expect(oldDisplay.alignment == .center && oldDisplay.panelOrder == .todayFirst, "old display settings gain tasteful layout defaults")
+expect(oldDisplay.dateScale > 1 && oldDisplay.todayScale > 1, "old untouched display settings gain readable scale")
 let legacySettings = try! JSONDecoder().decode(PomodoroSettings.self, from: Data("{\"workMinutes\":25,\"breakMinutes\":5,\"longBreakMinutes\":30,\"cyclesPerSet\":4,\"chimeEnabled\":false}".utf8))
 expect(legacySettings.clockOffsetMinutes == 15, "older settings migrate to the preferred clock offset")
 var resetTimer = FocusTimer(phase: .longBreak, status: .running, remainingSeconds: 10, endsAt: now, completedCyclesInSet: 2)
@@ -106,13 +118,18 @@ let exportSample = AppData(
     mainTask: TaskItem(
         title: "Shape the opening until it breathes",
         subtasks: [Subtask(title: "Watch once without reaching for the controls")]
-    )
+    ),
+    oneThing: "$10k"
 )
 let exported = MarkdownExporter.render(exportSample, date: date, calendar: calendar)
 expect(exported.contains("# Friday, 17 July 2026"), "Markdown export has day heading")
 expect(exported.contains("- [ ] Shape the opening until it breathes"), "Markdown export contains main thought")
 expect(exported.contains("  - [ ] Watch once without reaching for the controls"), "Markdown export contains subthoughts")
+expect(exported.contains("One thing: $10k"), "Markdown export carries the persistent One Thing")
 expect(exported.contains("## Distractions\n0"), "Markdown export contains daily distraction count")
+
+let longOneThing = AppData(oneThing: "1234567890123456789012345")
+expect(longOneThing.oneThing.count == 20, "One Thing stays within its glanceable twenty-character promise")
 
 let testDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
     .appendingPathComponent("build/test-output/\(UUID().uuidString)")

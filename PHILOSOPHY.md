@@ -6,11 +6,17 @@ This is not a cure, a coach, or a moral scorecard. It is a place to look.
 
 The main thought is writing, not a widget. You can write over it whenever the work changes. Later thoughts stay visible without competing. Subthoughts turn a heavy sentence into the first small movement.
 
-Time is intentionally imprecise. Seconds invite bargaining and clock-watching. `~20 minutes left` is enough to orient without turning focus into a race. Clock time moves in quarters for the same reason.
+The page has a grid because calm still needs structure. In portrait, the default gives the day list and distraction counter the top register, then lets the focus sentence and rhythm settle onto a lower baseline. The alternate main-first composition shares a spine between focus and rhythm and an outside edge with Today. There is no accidental centring, no floating panel, and no dead strip that exists only because a window got taller. Left, right, and swapped-order choices remain available when a person’s room or attention asks for them.
+
+The structural reference is Swiss International typography—grid, asymmetry, precision, legibility—not a costume of Helvetica and cold white. The [Swiss National Library’s short history](https://www.nb.admin.ch/en/the-international-style-1950-1970) names the useful parts plainly: a typographic grid, simple type, and precision in execution.
+
+Time is intentionally imprecise. Seconds invite bargaining and clock-watching. `~20 minutes left` is enough to orient without turning focus into a race. Clock time moves in quarters for the same reason. The day moves through small human names—first light, morning, midday, late light, golden hour, twilight, dusk, moonlight—so the page notices the hour without making a performance of it.
 
 The timer’s language stays literal because a control should not make you interpret it: Focus, Focus paused, Short break, Long break. Every ordinary state says what a click will do. When focus ends, Sidetrack asks one plain question. It does not make a sound by default. It does not start a break. Flow gets the final vote.
 
 The distraction clicker is not a score. A tap means only: “I noticed.” Past counts remain available without streaks, graphs, goals, judgment, or celebration.
+
+Beside it sits a small north star: a few characters that can say `$10k`, `SLJ`, or something only one person understands. It is deliberately not labelled in the page. It persists through the midnight page turn because some intentions outlive a task list.
 
 Small windows do not become little dashboards. Sidetrack keeps the same hierarchy, lets the sentence breathe across more lines, and quietly removes secondary detail before it compresses the work into noise.
 

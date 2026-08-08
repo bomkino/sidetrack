@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 private enum EditorTarget: Equatable {
     case main
+    case oneThing
     case newTask
     case newSubtask
     case newSideSubtask(UUID)
@@ -56,8 +57,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private var secondaryAlpha: CGFloat {
-        if oledDimActive { return 0.23 }
-        return data.timer.status == .running ? 0.30 : 1
+        if oledDimActive { return 0.26 }
+        return data.timer.status == .running ? 0.40 : 1
     }
 
     init(store: DataStore) {
@@ -72,6 +73,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         configureTimerActions()
         counterView.onIncrement = { [weak self] in self?.incrementDistraction() }
         counterView.onDecrement = { [weak self] in self?.decrementDistraction() }
+        counterView.onEditOneThing = { [weak self] in self?.editOneThing() }
         counterView.history = { [weak self] in
             guard let self else { return [] }
             return DistractionLog.recentDays(from: self.data.distractionsByDay).map { ($0.label, $0.count) }
@@ -95,13 +97,28 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let geometry = makeGeometry()
         timerView.frame = geometry.timer
         timerView.textScale = CGFloat(data.display.timerScale)
+        timerView.textAlignment = mainTextAlignment
+        let counterWidth = min(850, bounds.width * 0.68)
+        let isTopCounter = data.display.orientation == .vertical && data.display.panelOrder == .todayFirst
+        let counterX: CGFloat
+        if isTopCounter {
+            counterX = data.display.panelSide == .left
+                ? bounds.width - geometry.inset - counterWidth
+                : geometry.inset
+        } else {
+            counterX = max(54, bounds.width * 0.055)
+        }
         counterView.frame = NSRect(
-            x: max(54, bounds.width * 0.055) + geometry.drift.x,
-            y: bounds.height - geometry.inset - 40 + geometry.drift.y,
-            width: min(850, bounds.width * 0.68),
+            x: counterX + geometry.drift.x,
+            y: isTopCounter
+                ? max(28, geometry.sideHeadingY - 8) + geometry.drift.y
+                : bounds.height - geometry.inset - 40 + geometry.drift.y,
+            width: counterWidth,
             height: 50 * CGFloat(data.display.counterScale)
         )
         counterView.textScale = CGFloat(data.display.counterScale)
+        counterView.hidesOneThing = editorTarget == .oneThing
+        editor?.alignment = editorAlignment
         editor?.frame = editorFrame(for: editorTarget, geometry: geometry)
     }
 
@@ -146,6 +163,10 @@ final class FocusView: NSView, NSTextFieldDelegate {
     func editMain() {
         guard let task = data.mainTask else { beginEditing(.main, text: ""); return }
         beginEditing(.main, text: task.title)
+    }
+
+    func editOneThing() {
+        beginEditing(.oneThing, text: data.oneThing)
     }
 
     func toggleTimer() {
@@ -252,11 +273,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     func showPreferences() {
         let controller = PreferencesController(settings: data.settings, display: data.display) { [weak self] settings, display in
             guard let self else { return }
-            self.data.settings = settings
-            self.data.display = display
-            TimerEngine.resetDurationIfIdle(&self.data.timer, settings: settings)
-            self.changed()
-            self.onDisplaySettingsChange?(display)
+            self.applyPreferences(settings: settings, display: display)
         }
         preferencesController = controller
         controller.showWindow(nil)
@@ -287,6 +304,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         case "n": addTask()
         case "s": addSubtask()
         case "e": editMain()
+        case "g": editOneThing()
         case "t": toggleTimer()
         case " ": toggleTimer()
         case "p": promoteNext()
@@ -387,7 +405,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
             ], event: event)
             return
         }
-        var items = [("Add a thought", "new-thought")]
+        var items = [("Add a thought", "new-thought"), ("Rewrite One Thing", "one-thing-edit")]
         if data.mainTask != nil { items.insert(("Add a step", "main-add-sub"), at: 1) }
         items.append(contentsOf: timerContextChoices())
         items.append(("Reset timer", "timer-reset"))
@@ -457,6 +475,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     @objc private func contextAction(_ sender: NSMenuItem) {
         guard let command = sender.representedObject as? String else { return }
         if command == "main-edit" { editMain(); return }
+        if command == "one-thing-edit" { editOneThing(); return }
         if command == "main-complete" { completeMain(); return }
         if command == "new-thought" { addTask(); return }
         if command == "main-add-sub" { addSubtask(); return }
@@ -535,6 +554,37 @@ final class FocusView: NSView, NSTextFieldDelegate {
         replaceData(next, actionName: "Delete Thought")
     }
 
+    // “Centre” is a balanced editorial preset: focus opens toward the page,
+    // Today closes toward its outside edge. Explicit left/right choices remain
+    // literal, so customization never becomes a guessing game.
+    private var mainTextAlignment: NSTextAlignment {
+        switch data.display.alignment {
+        case .left: return .left
+        case .center: return data.display.panelSide == .left ? .right : .left
+        case .right: return .right
+        }
+    }
+
+    private var sideTextAlignment: NSTextAlignment {
+        switch data.display.alignment {
+        case .left: return .left
+        case .center: return data.display.panelSide == .left ? .left : .right
+        case .right: return .right
+        }
+    }
+
+    private var editorAlignment: NSTextAlignment {
+        guard let target = editorTarget else { return mainTextAlignment }
+        switch target {
+        case .oneThing:
+            return .left
+        case .newTask, .newSideSubtask, .side, .sideSubtask:
+            return sideTextAlignment
+        case .main, .newSubtask, .subtask:
+            return mainTextAlignment
+        }
+    }
+
     private struct Geometry {
         let inset: CGFloat
         let sideX: CGFloat
@@ -564,15 +614,32 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let sideX: CGFloat
         let mainWidth: CGFloat
         let mainX: CGFloat
-        let mainY: CGFloat
-        if isVertical {
+        var mainY: CGFloat
+        if isVertical && data.display.panelOrder == .todayFirst {
+            // Today and the counter get the top register; the main thought,
+            // rhythm, and time form the quieter lower register. This is the
+            // default portrait reading order on a left-hand vertical screen.
             mainWidth = min(bounds.width - inset * 2, max(320, bounds.width * 0.84))
             mainX = (bounds.width - mainWidth) * 0.5 + drift.x
-            sideWidth = min(mainWidth * 0.70 * sideScale, bounds.width - inset * 2)
-            sideX = panelOnLeft
-                ? inset + drift.x
-                : bounds.width - inset - sideWidth + drift.x
-            mainY = max(88, bounds.height * 0.115) + drift.y
+            sideWidth = mainWidth
+            sideX = mainX
+            mainY = max(380, bounds.height * 0.40) + drift.y
+        } else if isVertical {
+            // Portrait displays still deserve a full page. Two calm columns
+            // use the whole width and keep focus, rhythm, and the day list
+            // aligned as one composition.
+            let gap = max(28, min(56, bounds.width * 0.045))
+            let requestedSideWidth = min(360 * sideScale, max(260, bounds.width * 0.34))
+            sideWidth = min(requestedSideWidth, max(220, bounds.width - inset * 2 - gap - 320))
+            mainWidth = max(320, bounds.width - inset * 2 - gap - sideWidth)
+            if panelOnLeft {
+                sideX = inset + drift.x
+                mainX = sideX + sideWidth + gap
+            } else {
+                mainX = inset + drift.x
+                sideX = mainX + mainWidth + gap
+            }
+            mainY = max(118, bounds.height * 0.16) + drift.y
         } else {
             sideWidth = min(350 * sideScale, max(190, bounds.width * 0.19))
             let gap = max(32, min(76, bounds.width * 0.05))
@@ -600,18 +667,29 @@ final class FocusView: NSView, NSTextFieldDelegate {
             ? min(300, max(118, bounds.height * 0.24))
             : min(230, max(118, bounds.height * 0.27))
         let mainFontSize = hasWrittenMain
-            ? fittedMainFontSize(title, width: mainWidth - 34, maximum: baseFontSize, height: maximumTitleHeight)
+            ? fittedMainFontSize(title, width: mainWidth - 36, maximum: baseFontSize, height: maximumTitleHeight)
             : baseFontSize
         let titleFont = hasWrittenMain ? Typography.roman(mainFontSize) : Typography.italic(placeholderFontSize)
         let titleHeight = min(
-            textHeight(title, width: mainWidth - 34, font: titleFont, lineHeight: 0.94),
+            textHeight(title, width: mainWidth - 36, font: titleFont, lineHeight: 0.94),
             maximumTitleHeight
         )
         let timerHeight = TimerView.layoutHeight * CGFloat(data.display.timerScale)
-        let followingGap = TimerView.followingContentGap * max(0.9, CGFloat(data.display.timerScale))
-        let mainStepHeight = CGFloat(min(data.mainTask?.subtasks.count ?? 0, 7)) * 36 * CGFloat(data.display.stepsScale)
+        if isVertical && data.display.panelOrder == .todayFirst {
+            // A lower baseline gives the focus sentence gravity. Reserve a
+            // quiet foot below the last visible step, while the max floor
+            // keeps short portrait windows usable instead of colliding with
+            // the Today register above.
+            let visibleSteps = min(7, data.mainTask?.subtasks.count ?? 0)
+            let stepsHeight = CGFloat(visibleSteps) * 36 * CGFloat(data.display.stepsScale)
+            let focusBlockHeight = titleHeight + 20 + timerHeight + 24 + stepsHeight
+            let bottomBaseline = bounds.height - inset - 190 - focusBlockHeight
+            mainY = max(mainY, bottomBaseline)
+        }
         let sideHeadingY = isVertical
-            ? min(bounds.height * 0.72, mainY + titleHeight + 20 + timerHeight + followingGap + mainStepHeight + 34)
+            ? (data.display.panelOrder == .todayFirst
+                ? max(54, bounds.height * 0.07)
+                : mainY)
             : max(inset + 36, bounds.height * 0.15) + drift.y
         return Geometry(
             inset: inset,
@@ -635,6 +713,50 @@ final class FocusView: NSView, NSTextFieldDelegate {
         )
     }
 
+    private func subtaskCheckRect(_ g: Geometry, y: CGFloat, scale: CGFloat) -> NSRect {
+        let size = 11 * scale
+        let x = mainTextAlignment == .right
+            ? g.mainX + g.mainWidth - size - 4
+            : g.mainX + 35
+        return NSRect(x: x, y: y, width: size, height: size)
+    }
+
+    private func subtaskTitleRect(_ g: Geometry, y: CGFloat, scale: CGFloat) -> NSRect {
+        let width = g.mainWidth - 67
+        if mainTextAlignment == .right {
+            return NSRect(x: g.mainX + 18, y: y, width: width, height: 28 * scale)
+        }
+        return NSRect(x: g.mainX + 59, y: y, width: width, height: 28 * scale)
+    }
+
+    private func sideRowRects(_ g: Geometry, y: CGFloat, scale: CGFloat) -> (check: NSRect, title: NSRect) {
+        let checkSize = 11 * scale
+        if sideTextAlignment == .right {
+            return (
+                NSRect(x: g.sideX + g.sideWidth - checkSize, y: y + 5, width: checkSize, height: checkSize),
+                NSRect(x: g.sideX, y: y, width: max(30, g.sideWidth - 24 * scale), height: 34 * scale)
+            )
+        }
+        return (
+            NSRect(x: g.sideX, y: y + 5, width: checkSize, height: checkSize),
+            NSRect(x: g.sideX + 24 * scale, y: y, width: max(30, g.sideWidth - 24 * scale), height: 34 * scale)
+        )
+    }
+
+    private func sideSubtaskRectsFor(_ g: Geometry, y: CGFloat, stepScale: CGFloat, todayScale: CGFloat) -> (check: NSRect, title: NSRect) {
+        let checkSize = 9 * stepScale
+        if sideTextAlignment == .right {
+            return (
+                NSRect(x: g.sideX + g.sideWidth - checkSize, y: y + 4, width: checkSize, height: checkSize),
+                NSRect(x: g.sideX, y: y, width: max(30, g.sideWidth - 43 * todayScale), height: 27 * stepScale)
+            )
+        }
+        return (
+            NSRect(x: g.sideX + 24 * todayScale, y: y + 4, width: checkSize, height: checkSize),
+            NSRect(x: g.sideX + 43 * todayScale, y: y, width: max(30, g.sideWidth - 43 * todayScale), height: 27 * stepScale)
+        )
+    }
+
     private func drawMain(_ g: Geometry) {
         subtaskRects.removeAll()
         let fontSize = g.mainFontSize
@@ -643,35 +765,35 @@ final class FocusView: NSView, NSTextFieldDelegate {
         if let main = data.mainTask {
             let context = NSGraphicsContext.current!.cgContext
             mainRect = NSRect(
-                x: g.mainX + 34,
+                x: g.mainX + 18,
                 y: y,
-                width: g.mainWidth - 34,
+                width: g.mainWidth - 36,
                 height: max(64, g.mainTitleHeight + 8)
             )
             if editorTarget != .main {
                 drawText(main.title, in: mainRect,
                          font: Typography.roman(fontSize), color: Palette.paper,
-                         tracking: -0.48, lineHeight: 0.94)
+                         alignment: mainTextAlignment, tracking: -0.48, lineHeight: 0.94)
             }
 
             let stepScale = CGFloat(data.display.stepsScale)
             let followingGap = TimerView.followingContentGap * max(0.9, CGFloat(data.display.timerScale))
             var subY = min(g.timer.maxY + followingGap, bounds.height - 205)
             let subtaskBottom = g.isVertical
-                ? g.sideHeadingY - 22
+                ? (data.display.panelOrder == .todayFirst ? bounds.height - g.inset - 42 : g.sideHeadingY - 22)
                 : bounds.height - g.inset - 42
             context.saveGState()
             context.setAlpha(secondaryAlpha)
             for subtask in main.subtasks.prefix(7) {
                 let rowHeight = 36 * stepScale
                 guard subY + rowHeight - 8 <= subtaskBottom else { break }
-                let check = NSRect(x: g.mainX + 35, y: subY + 5, width: 11 * stepScale, height: 11 * stepScale)
-                let title = NSRect(x: g.mainX + 59, y: subY, width: g.mainWidth - 67, height: 28 * stepScale)
+                let check = subtaskCheckRect(g, y: subY + 5, scale: stepScale)
+                let title = subtaskTitleRect(g, y: subY, scale: stepScale)
                 drawCheck(in: check, checked: subtask.isCompleted)
                 if editorTarget != .subtask(subtask.id) {
                     drawText(subtask.title, in: title, font: Typography.roman(17 * stepScale),
                              color: subtask.isCompleted ? Palette.quiet : Palette.paper,
-                             tracking: 0.02, strike: subtask.isCompleted)
+                             alignment: mainTextAlignment, tracking: 0.02, strike: subtask.isCompleted)
                 }
                 subtaskRects.append((subtask.id, check, title))
                 subY += rowHeight
@@ -679,15 +801,15 @@ final class FocusView: NSView, NSTextFieldDelegate {
             context.restoreGState()
         } else {
             mainRect = NSRect(
-                x: g.mainX + 34,
+                x: g.mainX + 18,
                 y: y,
-                width: g.mainWidth - 34,
+                width: g.mainWidth - 36,
                 height: max(70, g.mainTitleHeight + 8)
             )
             if editorTarget != .main {
                 drawText(CopyBank.mainPrompt(index: data.copyIndex), in: mainRect,
                          font: Typography.italic(g.mainPlaceholderFontSize), color: Palette.quiet,
-                         tracking: -0.15, lineHeight: 1)
+                         alignment: mainTextAlignment, tracking: -0.15, lineHeight: 1)
             }
         }
     }
@@ -702,19 +824,22 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let headingY = g.sideHeadingY
         drawText(TimeLanguage.dayPhase(displayedDate),
                  in: NSRect(x: g.sideX, y: headingY, width: g.sideWidth, height: 30),
-                 font: Typography.italic(19 * dateScale), color: Palette.quiet, tracking: 0.03)
+                 font: Typography.italic(22 * dateScale), color: Palette.quiet,
+                 alignment: sideTextAlignment, tracking: 0.03)
         let date = g.sideWidth < 280
             ? TimeLanguage.compactDateLine(displayedDate)
             : TimeLanguage.dateLine(displayedDate)
         drawText("\(date)  ·  \(TimeLanguage.clockPhrase(displayedDate))",
                  in: NSRect(x: g.sideX, y: headingY + 30, width: g.sideWidth, height: 26),
-                 font: Typography.roman(12 * dateScale), color: Palette.faint, tracking: 0.12)
+                 font: Typography.roman(15 * dateScale), color: Palette.quiet,
+                 alignment: sideTextAlignment, tracking: 0.12)
 
         let rule = NSBezierPath()
-        rule.move(to: NSPoint(x: g.sideX, y: headingY + 61))
-        rule.curve(to: NSPoint(x: g.sideX + 54, y: headingY + 61.4),
-                   controlPoint1: NSPoint(x: g.sideX + 16, y: headingY + 60.6),
-                   controlPoint2: NSPoint(x: g.sideX + 38, y: headingY + 61.8))
+        let ruleStartX = sideTextAlignment == .right ? g.sideX + g.sideWidth - 54 : g.sideX
+        rule.move(to: NSPoint(x: ruleStartX, y: headingY + 61))
+        rule.curve(to: NSPoint(x: ruleStartX + 54, y: headingY + 61.4),
+                   controlPoint1: NSPoint(x: ruleStartX + 16, y: headingY + 60.6),
+                   controlPoint2: NSPoint(x: ruleStartX + 38, y: headingY + 61.8))
         Palette.hairline.setStroke()
         rule.lineWidth = 0.7
         rule.stroke()
@@ -723,57 +848,81 @@ final class FocusView: NSView, NSTextFieldDelegate {
         context.saveGState()
         context.setAlpha(secondaryAlpha)
 
-        let counterClearance: CGFloat = data.display.panelSide == .left ? 68 : 0
-        newTaskRect = NSRect(
-            x: g.sideX,
-            y: bounds.height - g.inset - 28 - counterClearance + g.drift.y,
-            width: 165,
-            height: 30 * todayScale
-        )
+        let topLimit = headingY + 92
+        let visibleSideSubtasks = bounds.width < 1100 ? 0 : (bounds.height < 720 ? 1 : 3)
+        let todayFirst = g.isVertical && data.display.panelOrder == .todayFirst
+        if todayFirst {
+            var cursor = topLimit
+            for task in data.today.prefix(7) {
+                let visibleSubtasks = Array(task.subtasks.prefix(visibleSideSubtasks))
+                let taskHeight = 38 * todayScale
+                let subtaskHeight = CGFloat(visibleSubtasks.count) * 27 * stepsScale
+                let blockHeight = taskHeight + subtaskHeight
+                guard cursor + blockHeight <= g.mainY - 34 else { break }
+                drawTodayTask(task, at: cursor, g: g, todayScale: todayScale, stepsScale: stepsScale, visibleSubtasks: visibleSubtasks)
+                cursor += blockHeight + 13 * todayScale
+            }
+            newTaskRect = NSRect(x: g.sideX, y: min(cursor, g.mainY - 30), width: g.sideWidth, height: 30 * todayScale)
+        } else {
+            let counterClearance: CGFloat = data.display.panelSide == .left ? 68 : 0
+            newTaskRect = NSRect(
+                x: g.sideX,
+                y: bounds.height - g.inset - 28 - counterClearance + g.drift.y,
+                width: g.sideWidth,
+                height: 30 * todayScale
+            )
+            var cursor = newTaskRect.minY - 24
+            for task in data.today.reversed() {
+                let visibleSubtasks = Array(task.subtasks.prefix(visibleSideSubtasks))
+                let taskHeight = 38 * todayScale
+                let subtaskHeight = CGFloat(visibleSubtasks.count) * 27 * stepsScale
+                let blockHeight = taskHeight + subtaskHeight
+                let y = cursor - blockHeight
+                guard y >= topLimit else { break }
+                drawTodayTask(task, at: y, g: g, todayScale: todayScale, stepsScale: stepsScale, visibleSubtasks: visibleSubtasks)
+                cursor = y - 13 * todayScale
+            }
+        }
         if editorTarget != .newTask {
             drawText("+   hold a thought", in: newTaskRect,
-                     font: Typography.italic(14 * todayScale), color: Palette.quiet, tracking: 0.02)
-        }
-
-        let topLimit = headingY + 92
-        var cursor = newTaskRect.minY - 24
-        let visibleSideSubtasks = bounds.width < 1100 ? 0 : (bounds.height < 720 ? 1 : 3)
-        for task in data.today.reversed() {
-            let visibleSubtasks = Array(task.subtasks.prefix(visibleSideSubtasks))
-            let taskHeight = 38 * todayScale
-            let subtaskHeight = CGFloat(visibleSubtasks.count) * 27 * stepsScale
-            let blockHeight = taskHeight + subtaskHeight
-            let y = cursor - blockHeight
-            guard y >= topLimit else { break }
-
-            let check = NSRect(x: g.sideX, y: y + 5, width: 11 * todayScale, height: 11 * todayScale)
-            let title = NSRect(x: g.sideX + 24 * todayScale, y: y, width: g.sideWidth - 24 * todayScale, height: 34 * todayScale)
-            drawCheck(in: check, checked: task.isCompleted)
-            if editorTarget != .side(task.id) {
-                drawText(task.title, in: title, font: Typography.roman(16 * todayScale),
-                         color: task.isCompleted ? Palette.quiet : Palette.paper,
-                         tracking: 0.02, lineHeight: 1.06, strike: task.isCompleted)
-            }
-            sideRects.append((task.id, check, title, title))
-
-            var subY = y + 36 * todayScale
-            for subtask in visibleSubtasks {
-                let subCheck = NSRect(x: g.sideX + 24 * todayScale, y: subY + 4, width: 9 * stepsScale, height: 9 * stepsScale)
-                let subTitle = NSRect(x: g.sideX + 43 * todayScale, y: subY, width: g.sideWidth - 43 * todayScale, height: 27 * stepsScale)
-                drawCheck(in: subCheck, checked: subtask.isCompleted)
-                if editorTarget != .sideSubtask(task.id, subtask.id) {
-                    drawText(subtask.title, in: subTitle, font: Typography.italic(13 * stepsScale),
-                             color: Palette.quiet, tracking: 0.02,
-                             lineHeight: 1.03, strike: subtask.isCompleted)
-                }
-                sideSubtaskRects.append((task.id, subtask.id, subCheck, subTitle))
-                subY += 27 * stepsScale
-            }
-            cursor = y - 13 * todayScale
+                     font: Typography.italic(15 * todayScale), color: Palette.quiet,
+                     alignment: sideTextAlignment, tracking: 0.02)
         }
 
         preferencesRect = .zero
         context.restoreGState()
+    }
+
+    private func drawTodayTask(
+        _ task: TaskItem,
+        at y: CGFloat,
+        g: Geometry,
+        todayScale: CGFloat,
+        stepsScale: CGFloat,
+        visibleSubtasks: [Subtask]
+    ) {
+        let row = sideRowRects(g, y: y, scale: todayScale)
+        drawCheck(in: row.check, checked: task.isCompleted)
+        if editorTarget != .side(task.id) {
+            drawText(task.title, in: row.title, font: Typography.roman(16 * todayScale),
+                     color: task.isCompleted ? Palette.quiet : Palette.paper,
+                     alignment: sideTextAlignment, tracking: 0.02,
+                     lineHeight: 1.06, strike: task.isCompleted)
+        }
+        sideRects.append((task.id, row.check, row.title, row.title))
+
+        var subY = y + 36 * todayScale
+        for subtask in visibleSubtasks {
+            let subRow = sideSubtaskRectsFor(g, y: subY, stepScale: stepsScale, todayScale: todayScale)
+            drawCheck(in: subRow.check, checked: subtask.isCompleted)
+            if editorTarget != .sideSubtask(task.id, subtask.id) {
+                drawText(subtask.title, in: subRow.title, font: Typography.italic(13 * stepsScale),
+                         color: Palette.quiet, alignment: sideTextAlignment,
+                         tracking: 0.02, lineHeight: 1.03, strike: subtask.isCompleted)
+            }
+            sideSubtaskRects.append((task.id, subtask.id, subRow.check, subRow.title))
+            subY += 27 * stepsScale
+        }
     }
 
     private func configureTimerActions() {
@@ -806,14 +955,27 @@ final class FocusView: NSView, NSTextFieldDelegate {
         return event
     }
 
-    private func changed(gentle: Bool = false) {
+    private func applyPreferences(settings: PomodoroSettings, display: DisplaySettings) {
+        data.settings = settings
+        data.display = display
+        TimerEngine.resetDurationIfIdle(&data.timer, settings: settings)
+        timerView.update(timer: data.timer, settings: data.settings,
+                         scale: CGFloat(data.display.timerScale), gentle: false)
+        updateCounter()
+        save()
+        needsLayout = true
+        needsDisplay = true
+        onDisplaySettingsChange?(display)
+    }
+
+    private func changed(gentle: Bool = false, reclaimFocus: Bool = true) {
         timerView.update(timer: data.timer, settings: data.settings,
                          scale: CGFloat(data.display.timerScale), gentle: gentle)
         updateCounter()
         save()
         needsLayout = true
         needsDisplay = true
-        window?.makeFirstResponder(self)
+        if reclaimFocus { window?.makeFirstResponder(self) }
     }
 
     @discardableResult
@@ -836,6 +998,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     private func updateCounter() {
         counterView.count = data.distractionsByDay[DistractionLog.key(), default: 0]
+        counterView.oneThing = data.oneThing
+        counterView.oneThingPlaceholder = CopyBank.oneThingPrompt(index: data.copyIndex)
         counterView.textScale = CGFloat(data.display.counterScale)
         counterView.alphaValue = oledDimActive ? 0.22 : (data.timer.status == .running ? 0.36 : 1)
     }
@@ -903,6 +1067,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         field.isEditable = true
         field.isSelectable = true
         field.focusRingType = .none
+        field.alignment = editorAlignment
         let prompt = placeholder(for: target)
         field.placeholderString = prompt
         if !prompt.isEmpty {
@@ -910,6 +1075,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
             switch target {
             case .main:
                 placeholderFont = Typography.italic(makeGeometry().mainPlaceholderFontSize)
+            case .oneThing:
+                placeholderFont = Typography.italic(13 * CGFloat(data.display.counterScale))
             case .newTask:
                 placeholderFont = Typography.italic(16 * CGFloat(data.display.todayScale))
             case .newSubtask:
@@ -939,6 +1106,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         field.action = #selector(commitEditorAction)
         editor = field
         editorTarget = target
+        counterView.hidesOneThing = target == .oneThing
         if target == .main {
             field.font = Typography.roman(makeGeometry().mainFontSize)
         }
@@ -961,7 +1129,15 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? RitualTextField,
-              editor === field, editorTarget == .main else { return }
+              editor === field, let target = editorTarget else { return }
+        if target == .oneThing {
+            let limited = String(field.stringValue.prefix(20))
+            if field.stringValue != limited { field.stringValue = limited }
+            needsLayout = true
+            needsDisplay = true
+            return
+        }
+        guard target == .main else { return }
         field.font = Typography.roman(makeGeometry().mainFontSize)
         needsLayout = true
         needsDisplay = true
@@ -970,7 +1146,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private func commitEditor() {
         guard let field = editor, let target = editorTarget else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { apply(text, to: target) }
+        if !text.isEmpty || target == .oneThing { apply(text, to: target) }
         finishEditor()
         changed()
     }
@@ -985,6 +1161,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         editor?.removeFromSuperview()
         editor = nil
         editorTarget = nil
+        counterView.hidesOneThing = false
         needsDisplay = true
     }
 
@@ -993,6 +1170,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
         case .main:
             if data.mainTask == nil { data.mainTask = TaskItem(title: text) }
             else { data.mainTask?.title = text }
+        case .oneThing:
+            data.oneThing = String(text.prefix(20))
         case .newTask:
             if data.mainTask == nil { data.mainTask = TaskItem(title: text) }
             else { data.today.append(TaskItem(title: text)) }
@@ -1021,18 +1200,20 @@ final class FocusView: NSView, NSTextFieldDelegate {
             let value = editor?.stringValue.isEmpty == false
                 ? editor!.stringValue
                 : placeholder(for: .main)
-            let height = textHeight(
+        let height = textHeight(
                 value,
-                width: g.mainWidth - 18,
+                width: g.mainWidth - 36,
                 font: Typography.roman(g.mainFontSize),
                 lineHeight: 0.94
             )
             return NSRect(
-                x: g.mainX + 26,
+                x: g.mainX + 18,
                 y: g.mainY - 4,
-                width: g.mainWidth - 18,
+                width: g.mainWidth - 36,
                 height: max(70, height + 12)
             )
+        case .oneThing:
+            return counterView.convert(counterView.oneThingRect, to: self).insetBy(dx: -3, dy: -3)
         case .newTask:
             return NSRect(x: g.sideX, y: newTaskRect.minY - 4, width: g.sideWidth, height: 34)
         case .newSubtask:
@@ -1056,6 +1237,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         case .main:
             let scale = CGFloat(data.display.mainScale)
             return Typography.roman(min(64 * scale, max(34 * scale, bounds.width * 0.032 * scale)))
+        case .oneThing: return Typography.roman(13 * CGFloat(data.display.counterScale))
         case .newTask, .side: return Typography.roman(16 * CGFloat(data.display.todayScale))
         case .newSubtask, .subtask: return Typography.roman(17 * CGFloat(data.display.stepsScale))
         case .newSideSubtask, .sideSubtask: return Typography.italic(13 * CGFloat(data.display.stepsScale))
@@ -1065,6 +1247,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private func placeholder(for target: EditorTarget) -> String {
         switch target {
         case .main: return CopyBank.mainPrompt(index: data.copyIndex)
+        case .oneThing: return CopyBank.oneThingPrompt(index: data.copyIndex)
         case .newTask: return CopyBank.laterPrompt(index: data.copyIndex)
         case .newSubtask: return CopyBank.stepPrompt(index: data.copyIndex)
         case .newSideSubtask: return CopyBank.sideStepPrompt(index: data.copyIndex)

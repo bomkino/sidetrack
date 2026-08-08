@@ -11,8 +11,18 @@ final class CounterView: NSView {
     }
     var onIncrement: (() -> Void)?
     var onDecrement: (() -> Void)?
+    var onEditOneThing: (() -> Void)?
     var history: (() -> [(label: String, count: Int)])?
     var textScale: CGFloat = 1 {
+        didSet { needsDisplay = true }
+    }
+    var oneThing = "" {
+        didSet { needsDisplay = true }
+    }
+    var oneThingPlaceholder = "a small north star" {
+        didSet { needsDisplay = true }
+    }
+    var hidesOneThing = false {
         didSet { needsDisplay = true }
     }
 
@@ -25,6 +35,18 @@ final class CounterView: NSView {
         NSRect(x: 31 * textScale, y: 12 * textScale, width: 58 * textScale, height: 24 * textScale)
     }
 
+    /// The small field beside the count. It stays a generous hit target while
+    /// remaining visually quiet enough to feel like a margin note.
+    var oneThingRect: NSRect {
+        let x = 105 * textScale
+        return NSRect(
+            x: x,
+            y: 9 * textScale,
+            width: max(100 * textScale, bounds.width - x - 8 * textScale),
+            height: 30 * textScale
+        )
+    }
+
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
 
@@ -34,8 +56,8 @@ final class CounterView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel("Distractions today")
-        setAccessibilityHelp("Press to count one distraction. Press U to undo a count.")
+        setAccessibilityLabel("Distractions and One Thing")
+        setAccessibilityHelp("Press to count one distraction. Press U to undo. Click One Thing or press G to rewrite it.")
         setAccessibilityValue(count)
     }
 
@@ -65,6 +87,8 @@ final class CounterView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         if hovered && minusRect.insetBy(dx: -5, dy: -4).contains(point) {
             onDecrement?()
+        } else if oneThingRect.insetBy(dx: -8, dy: -5).contains(point) {
+            onEditOneThing?()
         } else if countRect.insetBy(dx: -8, dy: -5).contains(point) {
             onIncrement?()
         }
@@ -75,6 +99,9 @@ final class CounterView: NSView {
         let heading = NSMenuItem(title: "Distractions, quietly counted", action: nil, keyEquivalent: "")
         heading.isEnabled = false
         menu.addItem(heading)
+        let rewrite = NSMenuItem(title: "Rewrite One Thing", action: #selector(editOneThing), keyEquivalent: "g")
+        rewrite.target = self
+        menu.addItem(rewrite)
         menu.addItem(.separator())
         for day in history?() ?? [] {
             let item = NSMenuItem(
@@ -88,6 +115,10 @@ final class CounterView: NSView {
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
+    @objc private func editOneThing() {
+        onEditOneThing?()
+    }
+
     override func accessibilityPerformPress() -> Bool {
         onIncrement?()
         return true
@@ -98,18 +129,31 @@ final class CounterView: NSView {
         if hovered {
             drawText("−", in: minusRect, font: Typography.roman(15 * textScale), color: Palette.quiet)
             drawKeyWords([
-                ("Distraction", "D"), ("Undo", "U"),
-                ("New thought", "N"), ("rEwrite", "E")
+                ("Distraction", "D"), ("Undo", "U"), ("Goal", "G")
             ], in: NSRect(x: 105 * textScale, y: 2, width: bounds.width - 105 * textScale, height: 22 * textScale))
             drawKeyWords([
-                ("Timer", "T"), ("Promote", "P"),
-                ("Reset day", "R"), ("Full screen", "F")
+                ("New thought", "N"), ("rEwrite", "E"), ("Timer", "T"), ("Reset", "R")
             ], in: NSRect(x: 105 * textScale, y: 23 * textScale, width: bounds.width - 105 * textScale, height: 22 * textScale))
         }
         drawText(
             String(format: "%04d", count), in: countRect,
             font: Typography.roman(13 * textScale), color: Palette.quiet, tracking: 1.5 * textScale
         )
+        if !hovered && !hidesOneThing {
+            let value = oneThing.isEmpty
+                ? oneThingPlaceholder
+                : oneThing
+            drawText(
+                value,
+                in: oneThingRect,
+                font: oneThing.isEmpty
+                    ? Typography.italic(12 * textScale)
+                    : Typography.roman(13 * textScale),
+                color: oneThing.isEmpty ? Palette.quiet : Palette.paper,
+                alignment: .left,
+                tracking: oneThing.isEmpty ? 0.02 : 0.01
+            )
+        }
     }
 
     private func quietlyRedraw() {

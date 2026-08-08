@@ -46,15 +46,14 @@ public enum TimeLanguage {
         switch calendar.component(.hour, from: date) {
         case 0...2: return "deep night"
         case 3...4: return "before dawn"
-        case 5: return "dawn"
-        case 6...8: return "early light"
-        case 9...11: return "morning"
-        case 12: return "noonday"
-        case 13...15: return "afternoon"
+        case 5: return "first light"
+        case 6...11: return "morning"
+        case 12...13: return "midday"
+        case 14...15: return "afternoon"
         case 16...17: return "late light"
         case 18: return "golden hour"
         case 19: return "twilight"
-        case 20: return "dusk"
+        case 20...21: return "dusk"
         default: return "moonlight"
         }
     }

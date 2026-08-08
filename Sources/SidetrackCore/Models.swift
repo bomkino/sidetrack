@@ -103,10 +103,26 @@ public enum PanelSide: String, Codable, Equatable {
     case right
 }
 
+/// Text alignment is independent from which edge the Today panel lives on.
+/// That small distinction keeps “right” useful both spatially and typographically.
+public enum ContentAlignment: String, Codable, Equatable {
+    case left
+    case center
+    case right
+}
+
+/// Vertical pages can give the day list the first word, or let the main thought lead.
+public enum PanelOrder: String, Codable, Equatable {
+    case mainFirst
+    case todayFirst
+}
+
 public struct DisplaySettings: Codable, Equatable {
     public var placement: DisplayPlacement
     public var orientation: DisplayOrientation
     public var panelSide: PanelSide
+    public var alignment: ContentAlignment
+    public var panelOrder: PanelOrder
     public var oledDimEnabled: Bool
     public var mainScale: Double
     public var timerScale: Double
@@ -119,17 +135,21 @@ public struct DisplaySettings: Codable, Equatable {
         placement: DisplayPlacement = .left,
         orientation: DisplayOrientation = .vertical,
         panelSide: PanelSide = .right,
+        alignment: ContentAlignment = .center,
+        panelOrder: PanelOrder = .todayFirst,
         oledDimEnabled: Bool = false,
-        mainScale: Double = 1,
-        timerScale: Double = 1,
-        todayScale: Double = 1,
-        stepsScale: Double = 1,
-        dateScale: Double = 1,
-        counterScale: Double = 1
+        mainScale: Double = 1.15,
+        timerScale: Double = 1.15,
+        todayScale: Double = 1.10,
+        stepsScale: Double = 1.10,
+        dateScale: Double = 1.25,
+        counterScale: Double = 1.10
     ) {
         self.placement = placement
         self.orientation = orientation
         self.panelSide = panelSide
+        self.alignment = alignment
+        self.panelOrder = panelOrder
         self.oledDimEnabled = oledDimEnabled
         self.mainScale = mainScale
         self.timerScale = timerScale
@@ -141,23 +161,46 @@ public struct DisplaySettings: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case placement, orientation, panelSide, oledDimEnabled
+        case placement, orientation, panelSide, alignment, panelOrder, oledDimEnabled
         case mainScale, timerScale, todayScale, stepsScale, dateScale, counterScale
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let placement = try container.decodeIfPresent(DisplayPlacement.self, forKey: .placement) ?? .left
+        let orientation = try container.decodeIfPresent(DisplayOrientation.self, forKey: .orientation) ?? .vertical
+        let panelSide = try container.decodeIfPresent(PanelSide.self, forKey: .panelSide) ?? .right
+        let alignment = try container.decodeIfPresent(ContentAlignment.self, forKey: .alignment)
+        let panelOrder = try container.decodeIfPresent(PanelOrder.self, forKey: .panelOrder)
+        let oldMainScale = try container.decodeIfPresent(Double.self, forKey: .mainScale)
+        let oldTimerScale = try container.decodeIfPresent(Double.self, forKey: .timerScale)
+        let oldTodayScale = try container.decodeIfPresent(Double.self, forKey: .todayScale)
+        let oldStepsScale = try container.decodeIfPresent(Double.self, forKey: .stepsScale)
+        let oldDateScale = try container.decodeIfPresent(Double.self, forKey: .dateScale)
+        let oldCounterScale = try container.decodeIfPresent(Double.self, forKey: .counterScale)
+        let legacyDefaults = alignment == nil || panelOrder == nil
+
+        func migrated(_ value: Double?, fallback: Double) -> Double {
+            guard let value else { return fallback }
+            // 1x was the old visual default. Preserve deliberate changes, but
+            // give untouched controls the new, more readable baseline.
+            if legacyDefaults && abs(value - 1) < 0.001 { return fallback }
+            return value
+        }
+
         self.init(
-            placement: try container.decodeIfPresent(DisplayPlacement.self, forKey: .placement) ?? .left,
-            orientation: try container.decodeIfPresent(DisplayOrientation.self, forKey: .orientation) ?? .vertical,
-            panelSide: try container.decodeIfPresent(PanelSide.self, forKey: .panelSide) ?? .right,
+            placement: placement,
+            orientation: orientation,
+            panelSide: panelSide,
+            alignment: alignment ?? .center,
+            panelOrder: panelOrder ?? .todayFirst,
             oledDimEnabled: try container.decodeIfPresent(Bool.self, forKey: .oledDimEnabled) ?? false,
-            mainScale: try container.decodeIfPresent(Double.self, forKey: .mainScale) ?? 1,
-            timerScale: try container.decodeIfPresent(Double.self, forKey: .timerScale) ?? 1,
-            todayScale: try container.decodeIfPresent(Double.self, forKey: .todayScale) ?? 1,
-            stepsScale: try container.decodeIfPresent(Double.self, forKey: .stepsScale) ?? 1,
-            dateScale: try container.decodeIfPresent(Double.self, forKey: .dateScale) ?? 1,
-            counterScale: try container.decodeIfPresent(Double.self, forKey: .counterScale) ?? 1
+            mainScale: migrated(oldMainScale, fallback: 1.15),
+            timerScale: migrated(oldTimerScale, fallback: 1.15),
+            todayScale: migrated(oldTodayScale, fallback: 1.10),
+            stepsScale: migrated(oldStepsScale, fallback: 1.10),
+            dateScale: migrated(oldDateScale, fallback: 1.25),
+            counterScale: migrated(oldCounterScale, fallback: 1.10)
         )
     }
 
@@ -214,6 +257,9 @@ public struct FocusTimer: Codable, Equatable {
 public struct AppData: Codable, Equatable {
     public var mainTask: TaskItem?
     public var today: [TaskItem]
+    /// A small north star that survives the midnight page turn.
+    /// Sidetrack keeps it short so it stays a glance, not another task list.
+    public var oneThing: String
     public var settings: PomodoroSettings
     public var display: DisplaySettings
     public var timer: FocusTimer
@@ -225,6 +271,7 @@ public struct AppData: Codable, Equatable {
     public init(
         mainTask: TaskItem? = nil,
         today: [TaskItem] = [],
+        oneThing: String = "",
         settings: PomodoroSettings = PomodoroSettings(),
         display: DisplaySettings = DisplaySettings(),
         timer: FocusTimer? = nil,
@@ -235,6 +282,7 @@ public struct AppData: Codable, Equatable {
     ) {
         self.mainTask = mainTask
         self.today = today
+        self.oneThing = String(oneThing.prefix(20))
         self.settings = settings
         self.display = display
         self.timer = timer ?? FocusTimer(remainingSeconds: settings.workMinutes * 60)
@@ -249,13 +297,14 @@ public struct AppData: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case mainTask, today, settings, display, timer, didSeedFirstRun, distractionsByDay, activeDayKey, copyIndex
+        case mainTask, today, oneThing, settings, display, timer, didSeedFirstRun, distractionsByDay, activeDayKey, copyIndex
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         mainTask = try container.decodeIfPresent(TaskItem.self, forKey: .mainTask)
         today = try container.decodeIfPresent([TaskItem].self, forKey: .today) ?? []
+        oneThing = String((try container.decodeIfPresent(String.self, forKey: .oneThing) ?? "").prefix(20))
         settings = try container.decodeIfPresent(PomodoroSettings.self, forKey: .settings) ?? PomodoroSettings()
         display = try container.decodeIfPresent(DisplaySettings.self, forKey: .display) ?? DisplaySettings()
         timer = try container.decodeIfPresent(FocusTimer.self, forKey: .timer)

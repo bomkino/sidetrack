@@ -9,6 +9,7 @@ final class TimerView: NSView {
     var timer = FocusTimer()
     var settings = PomodoroSettings()
     var textScale: CGFloat = 1
+    var textAlignment: NSTextAlignment = .left
     var onToggle: (() -> Void)?
     var onTakeBreak: (() -> Void)?
     var onKeepWorking: (() -> Void)?
@@ -57,7 +58,8 @@ final class TimerView: NSView {
             let rest = isLong ? "long rest" : "short rest"
             drawText("Focus finished  ·  take a \(rest)?",
                      in: NSRect(x: 0, y: 0, width: bounds.width, height: 27),
-                     font: Typography.italic(17 * textScale), color: Palette.paper)
+                     font: Typography.italic(17 * textScale), color: Palette.paper,
+                     alignment: textAlignment)
             firstOption = NSRect(x: 0, y: 27, width: 92, height: 24)
             secondOption = NSRect(x: 98, y: 27, width: 112, height: 24)
             drawOption("Begin rest", key: "B", in: firstOption)
@@ -65,7 +67,8 @@ final class TimerView: NSView {
         case .awaitingBreakChoice:
             drawText("Rest finished  ·  ready to focus again?",
                      in: NSRect(x: 0, y: 0, width: bounds.width, height: 27),
-                     font: Typography.italic(17 * textScale), color: Palette.paper)
+                     font: Typography.italic(17 * textScale), color: Palette.paper,
+                     alignment: textAlignment)
             firstOption = NSRect(x: 0, y: 27, width: 86, height: 24)
             secondOption = NSRect(x: 92, y: 27, width: 70, height: 24)
             drawOption("Start focus", key: "S", in: firstOption)
@@ -74,7 +77,8 @@ final class TimerView: NSView {
             drawStatusLine(statusLine(remaining: remaining), in: NSRect(x: 0, y: 0, width: bounds.width, height: 29))
             drawText(clickInstruction(),
                      in: NSRect(x: 0, y: 26, width: bounds.width, height: 22),
-                     font: Typography.roman(11 * textScale), color: Palette.faint, tracking: 0.1)
+                     font: Typography.roman(11 * textScale), color: Palette.faint,
+                     alignment: textAlignment, tracking: 0.1)
         }
     }
 
@@ -87,6 +91,10 @@ final class TimerView: NSView {
                 .kern: 0.02 * textScale
             ]
         )
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = textAlignment
+        paragraph.lineBreakMode = .byWordWrapping
+        attributed.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: attributed.length))
         if let separator = text.range(of: "  ·  ") {
             let prefixLength = text.distance(from: text.startIndex, to: separator.lowerBound)
             attributed.addAttribute(

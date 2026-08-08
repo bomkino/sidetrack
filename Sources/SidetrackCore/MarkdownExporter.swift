@@ -14,6 +14,10 @@ public enum MarkdownExporter {
         } else {
             lines.append("_A quiet page._")
         }
+        if !data.oneThing.isEmpty {
+            lines.append("")
+            lines.append("One thing: \(clean(data.oneThing))")
+        }
         lines.append("")
         lines.append("## Later, today")
         if data.today.isEmpty {

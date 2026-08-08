@@ -31,10 +31,19 @@ public enum CopyBank {
         "what will make returning easy?"
     ]
 
+    private static let oneThing = [
+        "a small north star",
+        "the quiet north star",
+        "what stays worth it?",
+        "keep this close",
+        "for the road ahead"
+    ]
+
     public static func mainPrompt(index: Int) -> String { pick(main, index) }
     public static func laterPrompt(index: Int) -> String { pick(later, index) }
     public static func stepPrompt(index: Int) -> String { pick(step, index) }
     public static func sideStepPrompt(index: Int) -> String { pick(sideStep, index) }
+    public static func oneThingPrompt(index: Int) -> String { pick(oneThing, index) }
 
     public static func next(_ index: Int) -> Int {
         (index + 1) % main.count
