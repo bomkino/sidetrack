@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var launchFullScreenAttempts = 0
     private var launchActivationAttempts = 0
     private var pendingDisplayScreen: NSScreen?
+    private var statusItem: NSStatusItem?
+    private var presenceMode: PresenceMode = .both
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -33,7 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if launchFullScreenPending { requestLaunchFullScreen(after: 0.12) }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        presenceMode != .menuBar
+    }
 
     func windowDidMove(_ notification: Notification) { rememberCurrentScreen() }
     func windowWillEnterFullScreen(_ notification: Notification) { fullScreenTransitioning = true }
@@ -64,7 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func buildWindow() {
         let store = DataStore()
         focusView = FocusView(store: store)
+        applyPresenceMode(focusView.displaySettings.presence)
         focusView.onDisplaySettingsChange = { [weak self] settings in
+            self?.applyPresenceMode(settings.presence)
             self?.moveToPreferredDisplay(for: settings)
         }
         window = NSWindow(
@@ -98,6 +104,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             launchFullScreenPending = true
             requestLaunchFullScreen(after: 0.35)
         }
+    }
+
+    private func applyPresenceMode(_ mode: PresenceMode) {
+        presenceMode = mode
+        let needsStatusItem = mode == .menuBar || mode == .both
+        if needsStatusItem {
+            installStatusItemIfNeeded()
+            statusItem?.menu = makeStatusMenu()
+        } else if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
+            self.statusItem = nil
+        }
+
+        let desiredPolicy: NSApplication.ActivationPolicy = mode == .menuBar ? .accessory : .regular
+        if NSApp.activationPolicy() != desiredPolicy {
+            NSApp.setActivationPolicy(desiredPolicy)
+        }
+    }
+
+    private func installStatusItemIfNeeded() {
+        guard statusItem == nil else { return }
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.image = makeStatusImage()
+            button.imageScaling = .scaleProportionallyDown
+            button.imagePosition = .imageOnly
+            button.toolTip = "Sidetrack"
+            button.setAccessibilityLabel("Sidetrack")
+        }
+        statusItem = item
+    }
+
+    /// A small, transparent version of the app mark reads better in the menu
+    /// bar than a whole square application icon. It keeps the paper line and
+    /// one warm point, then leaves the surrounding menu bar alone.
+    private func makeStatusImage() -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18))
+        image.lockFocus()
+
+        let mark = NSBezierPath()
+        mark.move(to: NSPoint(x: 7.2, y: 2))
+        mark.line(to: NSPoint(x: 7.2, y: 16))
+        mark.curve(
+            to: NSPoint(x: 14.5, y: 6.1),
+            controlPoint1: NSPoint(x: 7.2, y: 10.4),
+            controlPoint2: NSPoint(x: 13.4, y: 9.5)
+        )
+        mark.curve(
+            to: NSPoint(x: 15.3, y: 3.6),
+            controlPoint1: NSPoint(x: 15.2, y: 5.1),
+            controlPoint2: NSPoint(x: 15.1, y: 4.2)
+        )
+        Palette.paper.setStroke()
+        mark.lineWidth = 1.4
+        mark.lineCapStyle = .round
+        mark.lineJoinStyle = .round
+        mark.stroke()
+
+        Palette.ochre.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 13.1, y: 1.4, width: 3.2, height: 3.2)).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    private func makeStatusMenu() -> NSMenu {
+        let menu = NSMenu(title: "Sidetrack")
+        let show = menu.addItem(withTitle: "Show Sidetrack", action: #selector(showWindow), keyEquivalent: "")
+        show.target = self
+        menu.addItem(.separator())
+
+        let presence = NSMenuItem(title: "Presence", action: nil, keyEquivalent: "")
+        let presenceMenu = NSMenu(title: "Presence")
+        for (title, mode) in [("Dock only", PresenceMode.dock),
+                              ("Menu bar only", PresenceMode.menuBar),
+                              ("Dock + menu bar", PresenceMode.both)] {
+            let item = NSMenuItem(title: title, action: #selector(selectPresence(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = mode == presenceMode ? .on : .off
+            presenceMenu.addItem(item)
+        }
+        presence.submenu = presenceMenu
+        menu.addItem(presence)
+
+        let preferences = menu.addItem(withTitle: "Preferences…", action: #selector(showPreferences), keyEquivalent: "")
+        preferences.target = self
+        menu.addItem(.separator())
+        let hide = menu.addItem(withTitle: "Hide Sidetrack", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        hide.keyEquivalentModifierMask = [.command]
+        menu.addItem(withTitle: "Quit Sidetrack", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        return menu
     }
 
     private func requestLaunchFullScreen(after delay: TimeInterval) {
@@ -289,6 +386,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let screen = window.screen,
               let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return }
         UserDefaults.standard.set(number.intValue, forKey: "displayID")
+    }
+
+    @objc private func showWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(focusView)
+    }
+
+    @objc private func selectPresence(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = PresenceMode(rawValue: raw) else { return }
+        focusView.setPresenceMode(mode)
     }
 
     @objc private func systemWoke() { focusView.minuteChanged() }

@@ -64,10 +64,33 @@ var workTimer = FocusTimer(status: .running, remainingSeconds: 60, endsAt: now)
 expect(TimerEngine.refresh(&workTimer, now: now) == .workEnded, "work end emits event")
 expect(workTimer.status == .awaitingWorkChoice, "work waits for choice")
 expect(workTimer.endsAt == nil, "work does not auto-start break")
+expect(workTimer.phaseEndedAt == now, "work remembers the exact phase finish")
 
 var breakTimer = FocusTimer(phase: .shortBreak, status: .running, remainingSeconds: 60, endsAt: now)
 expect(TimerEngine.refresh(&breakTimer, now: now) == .breakEnded, "break end emits event")
 expect(breakTimer.status == .awaitingBreakChoice, "break does not auto-restart")
+
+let phaseEnd = Date(timeIntervalSince1970: 2_000)
+let overrunDuration = 50
+let waitingWork = FocusTimer(
+    status: .awaitingWorkChoice,
+    remainingSeconds: 0,
+    phaseDurationSeconds: overrunDuration,
+    phaseEndedAt: phaseEnd
+)
+expect(TimerEngine.overrunCue(waitingWork, now: phaseEnd.addingTimeInterval(49)) == .none, "overrun stays quiet before twice the phase")
+expect(TimerEngine.overrunCue(waitingWork, now: phaseEnd.addingTimeInterval(50)) == .pulse, "twice the phase begins a soft pulse")
+expect(TimerEngine.overrunCue(waitingWork, now: phaseEnd.addingTimeInterval(100)) == .underline, "three times the phase adds an underline")
+expect(TimerEngine.overrunCue(waitingWork, now: phaseEnd.addingTimeInterval(150)) == .pulseAndUnderline, "four times the phase combines both cues")
+expect(TimerEngine.overrunCue(waitingWork, now: phaseEnd.addingTimeInterval(200)) == .quiet, "five times the phase goes quiet for a likely AFK state")
+let waitingRest = FocusTimer(
+    phase: .shortBreak,
+    status: .awaitingBreakChoice,
+    remainingSeconds: 0,
+    phaseDurationSeconds: 12 * 60,
+    phaseEndedAt: phaseEnd
+)
+expect(TimerEngine.overrunCue(waitingRest, now: phaseEnd.addingTimeInterval(12 * 60)) == .pulse, "the same cue ladder works for short rest")
 
 var cycleTimer = FocusTimer(status: .awaitingWorkChoice, remainingSeconds: 0, completedCyclesInSet: 3)
 TimerEngine.takeBreak(&cycleTimer, settings: PomodoroSettings(cyclesPerSet: 4), now: now)
@@ -91,6 +114,7 @@ expect(displayDefaults.orientation == .vertical, "default composition is vertica
 expect(displayDefaults.panelSide == .right, "default Today list stays on the right")
 expect(displayDefaults.alignment == .center, "default text alignment uses balanced edges")
 expect(displayDefaults.panelOrder == .todayFirst, "default page gives Today and the counter the top register")
+expect(displayDefaults.presence == .both, "default presence keeps Dock and menu bar access")
 expect(displayDefaults.dateScale > 1 && displayDefaults.timerScale > 1, "default time is comfortably larger than the old baseline")
 var oversizedDisplay = DisplaySettings(mainScale: 9, timerScale: 0.1, todayScale: 2, stepsScale: -1, dateScale: 1.8, counterScale: 0.2)
 oversizedDisplay.normalize()
@@ -100,6 +124,7 @@ let legacyAppData = try! JSONDecoder().decode(AppData.self, from: Data("{\"today
 expect(legacyAppData.display == DisplaySettings(), "older day files receive display defaults")
 let oldDisplay = try! JSONDecoder().decode(DisplaySettings.self, from: Data("{\"placement\":\"left\",\"orientation\":\"vertical\",\"panelSide\":\"right\",\"oledDimEnabled\":false,\"mainScale\":1,\"timerScale\":1,\"todayScale\":1,\"stepsScale\":1,\"dateScale\":1,\"counterScale\":1}".utf8))
 expect(oldDisplay.alignment == .center && oldDisplay.panelOrder == .todayFirst, "old display settings gain tasteful layout defaults")
+expect(oldDisplay.presence == .both, "old display settings keep both macOS access points")
 expect(oldDisplay.dateScale > 1 && oldDisplay.todayScale > 1, "old untouched display settings gain readable scale")
 let legacySettings = try! JSONDecoder().decode(PomodoroSettings.self, from: Data("{\"workMinutes\":25,\"breakMinutes\":5,\"longBreakMinutes\":30,\"cyclesPerSet\":4,\"chimeEnabled\":false}".utf8))
 expect(legacySettings.clockOffsetMinutes == 15, "older settings migrate to the preferred clock offset")

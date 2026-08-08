@@ -12,7 +12,7 @@ The structural reference is Swiss International typography—grid, asymmetry, pr
 
 Time is intentionally imprecise. Seconds invite bargaining and clock-watching. `~20 minutes left` is enough to orient without turning focus into a race. Clock time moves in quarters for the same reason. The day moves through small human names—first light, morning, midday, late light, golden hour, twilight, dusk, moonlight—so the page notices the hour without making a performance of it.
 
-The timer’s language stays literal because a control should not make you interpret it: Focus, Focus paused, Short break, Long break. Every ordinary state says what a click will do. When focus ends, Sidetrack asks one plain question. It does not make a sound by default. It does not start a break. Flow gets the final vote.
+The timer’s language stays literal because a control should not make you interpret it: Focus, Focus paused, Short break, Long break. Every ordinary state says what a click will do. When focus ends, Sidetrack asks one plain question. If that question waits for twice the phase length, the line gently breathes; at three times a glyph-aware hairline joins it, stepping around descenders instead of pretending text is a box; at four both are present; at five they stop. That last quiet is deliberate: a person who has been away does not need a blinking reprimand waiting for them. It does not make a sound by default. It does not start a break. Flow gets the final vote.
 
 The distraction clicker is not a score. A tap means only: “I noticed.” Past counts remain available without streaks, graphs, goals, judgment, or celebration.
 

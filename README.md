@@ -17,6 +17,7 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 ## What it does
 
 - Opens full-screen on the chosen second display: left, right, above, or the last remembered screen.
+- Lets the app live in the Dock, the menu bar, or both. Menu-bar-only mode keeps the page one click away without adding another Cmd-Tab stop.
 - Uses a small editorial grid in portrait and landscape. The default vertical page gives Today and the distraction counter the top register, then anchors the focus sentence and rhythm lower down; the alternate main-first split remains available. The Today panel can live on either side, with balanced-edge, left-edge, right-edge, and swapped-order presets.
 - Preferences preview live as you change them; there is no save-and-guess loop.
 - Gives each quiet layer its own bounded size control—main thought, rhythm, Today list, steps, date/time, and distraction count.
@@ -27,6 +28,7 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - Runs a manual `50 / 12 / 50 / 12 / 50 / 30` focus rhythm.
 - Fades secondary material during focus.
 - Uses stable, literal timer states—Ready, Focus underway, Focus paused, Short rest underway, Long rest underway—and always says what a click will do.
+- If a finished focus or rest waits for you, it whispers rather than notifying: a slow text pulse at 2× the phase length, a glyph-aware hairline at 3× that leaves room for descenders, both at 4×, then silence at 5× for a likely away-from-keyboard stretch.
 - Speaks the date and time through changing light: dawn, twilight, moonlight, and the hours between.
 - Displays its clock 15 minutes ahead by default; the offset is editable in Preferences and never changes pomodoro timing.
 - Counts distractions with a tiny daily `0000` clicker; hover reveals a soft decrement and the keyboard map, while right-click shows seven days.
@@ -94,6 +96,8 @@ The unpacked app appears at `build/Sidetrack.app`; a clean signed install archiv
 ## Performance
 
 Sidetrack is native AppKit with custom event-driven drawing. No continuous render loop exists. Clock, vague timer, and pixel drift redraw once per minute; edits and window changes redraw on input. An idle minute does not touch the data file.
+
+The overrun whisper uses a single Core Animation layer only while a finished phase is waiting; it never becomes a second-by-second countdown.
 
 Measured in full-screen on a 1920 × 1080 logical second display after the current polish pass:
 

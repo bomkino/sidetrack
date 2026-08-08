@@ -14,6 +14,7 @@ final class PreferencesController: NSWindowController, NSTextFieldDelegate {
     private let panelSidePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let alignmentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let orderPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let presencePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let mainScale = NSStepper()
     private let timerScale = NSStepper()
     private let todayScale = NSStepper()
@@ -101,8 +102,13 @@ final class PreferencesController: NSWindowController, NSTextFieldDelegate {
                     items: [("Main thought first", PanelOrder.mainFirst.rawValue),
                             ("Today list first", PanelOrder.todayFirst.rawValue)],
                     selected: display.panelOrder.rawValue, y: 275, to: content)
+        addPopupRow("Presence", popup: presencePopup,
+                    items: [("Dock only", PresenceMode.dock.rawValue),
+                            ("Menu bar only", PresenceMode.menuBar.rawValue),
+                            ("Dock + menu bar", PresenceMode.both.rawValue)],
+                    selected: display.presence.rawValue, y: 243, to: content)
 
-        oledButton.frame = NSRect(x: 25, y: 235, width: 330, height: 24)
+        oledButton.frame = NSRect(x: 25, y: 205, width: 330, height: 24)
         oledButton.state = display.oledDimEnabled ? .on : .off
         oledButton.target = self
         oledButton.action = #selector(preferenceChanged(_:))
@@ -111,16 +117,16 @@ final class PreferencesController: NSWindowController, NSTextFieldDelegate {
         oledButton.setAccessibilityLabel("OLED dim mode while focus runs")
         content.addSubview(oledButton)
         let oledNote = label("Black as night; the thought, rhythm, and time stay awake.", size: 11, color: Palette.faint)
-        oledNote.frame = NSRect(x: 28, y: 214, width: 500, height: 18)
+        oledNote.frame = NSRect(x: 28, y: 184, width: 500, height: 18)
         content.addSubview(oledNote)
 
-        addSection("A little more / a little less", y: 178, to: content)
+        addSection("A little more / a little less", y: 148, to: content)
         addScalePair("Main thought", stepper: mainScale, value: display.mainScale,
-                     "Rhythm", stepper: timerScale, value: display.timerScale, y: 144, to: content)
+                     "Rhythm", stepper: timerScale, value: display.timerScale, y: 114, to: content)
         addScalePair("Today list", stepper: todayScale, value: display.todayScale,
-                     "Steps", stepper: stepsScale, value: display.stepsScale, y: 112, to: content)
+                     "Steps", stepper: stepsScale, value: display.stepsScale, y: 82, to: content)
         addScalePair("Date & time", stepper: dateScale, value: display.dateScale,
-                     "Distraction count", stepper: counterScale, value: display.counterScale, y: 80, to: content)
+                     "Distraction count", stepper: counterScale, value: display.counterScale, y: 50, to: content)
 
         let save = NSButton(title: "Done", target: self, action: #selector(saveAndClose))
         save.isBordered = false
@@ -262,6 +268,7 @@ final class PreferencesController: NSWindowController, NSTextFieldDelegate {
             panelSide: PanelSide(rawValue: panelSidePopup.selectedItem?.representedObject as? String ?? "right") ?? .right,
             alignment: ContentAlignment(rawValue: alignmentPopup.selectedItem?.representedObject as? String ?? "center") ?? .center,
             panelOrder: PanelOrder(rawValue: orderPopup.selectedItem?.representedObject as? String ?? "mainFirst") ?? .mainFirst,
+            presence: PresenceMode(rawValue: presencePopup.selectedItem?.representedObject as? String ?? "both") ?? .both,
             oledDimEnabled: oledButton.state == .on,
             mainScale: mainScale.doubleValue,
             timerScale: timerScale.doubleValue,

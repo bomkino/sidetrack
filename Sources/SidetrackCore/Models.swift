@@ -117,12 +117,21 @@ public enum PanelOrder: String, Codable, Equatable {
     case todayFirst
 }
 
+/// Where macOS should expose Sidetrack when the page is open.
+/// Menu-bar-only mode removes the Dock/Cmd-Tab presence without hiding the window.
+public enum PresenceMode: String, Codable, Equatable {
+    case dock
+    case menuBar
+    case both
+}
+
 public struct DisplaySettings: Codable, Equatable {
     public var placement: DisplayPlacement
     public var orientation: DisplayOrientation
     public var panelSide: PanelSide
     public var alignment: ContentAlignment
     public var panelOrder: PanelOrder
+    public var presence: PresenceMode
     public var oledDimEnabled: Bool
     public var mainScale: Double
     public var timerScale: Double
@@ -137,6 +146,7 @@ public struct DisplaySettings: Codable, Equatable {
         panelSide: PanelSide = .right,
         alignment: ContentAlignment = .center,
         panelOrder: PanelOrder = .todayFirst,
+        presence: PresenceMode = .both,
         oledDimEnabled: Bool = false,
         mainScale: Double = 1.15,
         timerScale: Double = 1.15,
@@ -150,6 +160,7 @@ public struct DisplaySettings: Codable, Equatable {
         self.panelSide = panelSide
         self.alignment = alignment
         self.panelOrder = panelOrder
+        self.presence = presence
         self.oledDimEnabled = oledDimEnabled
         self.mainScale = mainScale
         self.timerScale = timerScale
@@ -161,7 +172,7 @@ public struct DisplaySettings: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case placement, orientation, panelSide, alignment, panelOrder, oledDimEnabled
+        case placement, orientation, panelSide, alignment, panelOrder, presence, oledDimEnabled
         case mainScale, timerScale, todayScale, stepsScale, dateScale, counterScale
     }
 
@@ -172,6 +183,7 @@ public struct DisplaySettings: Codable, Equatable {
         let panelSide = try container.decodeIfPresent(PanelSide.self, forKey: .panelSide) ?? .right
         let alignment = try container.decodeIfPresent(ContentAlignment.self, forKey: .alignment)
         let panelOrder = try container.decodeIfPresent(PanelOrder.self, forKey: .panelOrder)
+        let presence = try container.decodeIfPresent(PresenceMode.self, forKey: .presence) ?? .both
         let oldMainScale = try container.decodeIfPresent(Double.self, forKey: .mainScale)
         let oldTimerScale = try container.decodeIfPresent(Double.self, forKey: .timerScale)
         let oldTodayScale = try container.decodeIfPresent(Double.self, forKey: .todayScale)
@@ -194,6 +206,7 @@ public struct DisplaySettings: Codable, Equatable {
             panelSide: panelSide,
             alignment: alignment ?? .center,
             panelOrder: panelOrder ?? .todayFirst,
+            presence: presence,
             oledDimEnabled: try container.decodeIfPresent(Bool.self, forKey: .oledDimEnabled) ?? false,
             mainScale: migrated(oldMainScale, fallback: 1.15),
             timerScale: migrated(oldTimerScale, fallback: 1.15),
@@ -238,19 +251,45 @@ public struct FocusTimer: Codable, Equatable {
     public var remainingSeconds: Int
     public var endsAt: Date?
     public var completedCyclesInSet: Int
+    /// The expected length and exact finish of the current phase. These let
+    /// Sidetrack notice a forgotten choice without changing the timer itself.
+    public var phaseDurationSeconds: Int?
+    public var phaseEndedAt: Date?
 
     public init(
         phase: TimerPhase = .work,
         status: TimerStatus = .idle,
         remainingSeconds: Int = 50 * 60,
         endsAt: Date? = nil,
-        completedCyclesInSet: Int = 0
+        completedCyclesInSet: Int = 0,
+        phaseDurationSeconds: Int? = nil,
+        phaseEndedAt: Date? = nil
     ) {
         self.phase = phase
         self.status = status
         self.remainingSeconds = remainingSeconds
         self.endsAt = endsAt
         self.completedCyclesInSet = completedCyclesInSet
+        self.phaseDurationSeconds = phaseDurationSeconds
+        self.phaseEndedAt = phaseEndedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case phase, status, remainingSeconds, endsAt, completedCyclesInSet
+        case phaseDurationSeconds, phaseEndedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            phase: try container.decodeIfPresent(TimerPhase.self, forKey: .phase) ?? .work,
+            status: try container.decodeIfPresent(TimerStatus.self, forKey: .status) ?? .idle,
+            remainingSeconds: try container.decodeIfPresent(Int.self, forKey: .remainingSeconds) ?? 50 * 60,
+            endsAt: try container.decodeIfPresent(Date.self, forKey: .endsAt),
+            completedCyclesInSet: try container.decodeIfPresent(Int.self, forKey: .completedCyclesInSet) ?? 0,
+            phaseDurationSeconds: try container.decodeIfPresent(Int.self, forKey: .phaseDurationSeconds),
+            phaseEndedAt: try container.decodeIfPresent(Date.self, forKey: .phaseEndedAt)
+        )
     }
 }
 

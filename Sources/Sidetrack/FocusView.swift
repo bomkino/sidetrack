@@ -281,6 +281,13 @@ final class FocusView: NSView, NSTextFieldDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func setPresenceMode(_ mode: PresenceMode) {
+        guard data.display.presence != mode else { return }
+        data.display.presence = mode
+        save()
+        onDisplaySettingsChange?(data.display)
+    }
+
     override func keyDown(with event: NSEvent) {
         guard !event.modifierFlags.contains(.command) else { super.keyDown(with: event); return }
         let key = event.charactersIgnoringModifiers?.lowercased()
@@ -946,12 +953,14 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     @discardableResult
     private func refreshTimer() -> TimerEvent {
+        TimerEngine.ensurePhaseMetadata(&data.timer, settings: data.settings)
         let event = TimerEngine.refresh(&data.timer)
         if event != .none, data.settings.chimeEnabled {
             NSSound(named: NSSound.Name("Glass"))?.play()
         }
         timerView.update(timer: data.timer, settings: data.settings,
-                         scale: CGFloat(data.display.timerScale), gentle: event != .none)
+                         scale: CGFloat(data.display.timerScale), gentle: event != .none,
+                         overrun: TimerEngine.overrunCue(data.timer))
         return event
     }
 
@@ -960,7 +969,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
         data.display = display
         TimerEngine.resetDurationIfIdle(&data.timer, settings: settings)
         timerView.update(timer: data.timer, settings: data.settings,
-                         scale: CGFloat(data.display.timerScale), gentle: false)
+                         scale: CGFloat(data.display.timerScale), gentle: false,
+                         overrun: TimerEngine.overrunCue(data.timer))
         updateCounter()
         save()
         needsLayout = true
@@ -970,7 +980,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     private func changed(gentle: Bool = false, reclaimFocus: Bool = true) {
         timerView.update(timer: data.timer, settings: data.settings,
-                         scale: CGFloat(data.display.timerScale), gentle: gentle)
+                         scale: CGFloat(data.display.timerScale), gentle: gentle,
+                         overrun: TimerEngine.overrunCue(data.timer))
         updateCounter()
         save()
         needsLayout = true
