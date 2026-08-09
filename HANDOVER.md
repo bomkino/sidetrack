@@ -30,18 +30,18 @@ Read `README.md`, `PHILOSOPHY.md`, then `Docs/design-reference.png`.
 - Local writes are atomic with a rolling readable backup; a missing or unreadable primary recovers automatically, and unreadable source JSON is preserved. Save/export failures keep the page intact and explain the local write problem. Repeated same-day archives receive collision-safe suffixes instead of overwriting earlier pages.
 - Full-screen launch waits for confirmed app activation, then uses a bounded, transition-aware retry instead of one brittle delayed toggle. It is verified on the remembered second display at 1920×1080 logical / 3840×2160 physical.
 - Last core verification: `Sidetrack checks passed: 189`; the new grid, scale migration, alignment/order model, live-preference callback path, presence preference, north-star persistence/export, overrun cue ladder, and morning/midday language are covered in addition to the existing resize, OLED, editing, timer, persistence, archive, icon, and full-screen checks.
-- Settled idle: 0.0% CPU between minute redraws; about 44–55 MB in the final windowed resize pass. A portrait full-screen backing surface can make macOS report about 90 MB physical footprint, stable rather than a leak.
+- Settled idle: 0.0% CPU between minute redraws. The installed 1.4.1 process sampled at 7.3–8.5 MB RSS after launch; Activity Monitor may report a larger physical footprint for a portrait full-screen backing surface, but repeated samples remain stable rather than growing like a leak.
 - App icon source: `Assets/Sidetrack-icon-source.png`.
 - GitHub product portrait: `Docs/Sidetrack-product-portrait.png`; 2400 × 1350, fictional task data, no private user content.
 - Built app: `build/Sidetrack.app`; use `build/Sidetrack.app.zip` for installation because the synced workspace can decorate unpacked bundle folders with unrelated Finder icon metadata after signing.
-- Installed app: `/Applications/Sidetrack.app`, version 1.4.0 (build 3), ad-hoc signature verified. Installed executable SHA-256: `6989f99a8db961c1285cfeefd0347ccc3891a3b2038546382a3aa49a8d11b23d`, matching `build/Sidetrack.app`. The prior 1.3.0 bundle is reversible at `/Applications/Sidetrack.app.previous-1.3.0`; the older 1.2.0 bundle remains at `/Applications/Sidetrack.app.previous`. The current launch lands full-screen on the left vertical display by default.
-- Public repository: `https://github.com/bomkino/sidetrack`; branch and release state must be checked live.
-- Current public main and release hashes: verify live before handoff.
+- Installed app: `/Applications/Sidetrack.app`, version 1.4.1 (build 4), ad-hoc signature verified. Installed executable SHA-256: `2ea8a191366ae71671d81cd606187e0b3080fa7f5d9cc5ea36166d5b4750041d`, matching `build/Sidetrack.app`. The replaced 1.4.0 bundle is reversible at `/Applications/Sidetrack.app.previous-1.4.0`; older backups remain untouched. The current launch lands full-screen on the left vertical display by default.
+- Public repository: `https://github.com/bomkino/sidetrack`; default branch `main`; CC0-1.0 detected.
+- Public main: `178b0d0110e8d23d1ef27d046186e384aed5212f`; release: `v1.4.1`; archive SHA-256: `5ff2ba5ee9afe895cd67b4785b8ec0e1188f7eb918b286cc550cf3bae09a7467`; macOS CI run `31291700605` passed.
 
 ## Finish next
 
 1. Read live git status; run `Scripts/test.sh` and `Scripts/build-app.sh` after any edit.
-2. Confirm GitHub default branch and CC0-1.0 license detection before the next release.
+2. Recheck GitHub default branch, license detection, and CI before the next release.
 
 ## Release checks
 
