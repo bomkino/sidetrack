@@ -24,6 +24,8 @@ Read `README.md`, `PHILOSOPHY.md`, then `Docs/design-reference.png`.
 - Six bounded component scales keep the main thought, rhythm, Today list, steps, date/time, and distraction count adjustable without turning the page into a dashboard. OLED dim mode uses a true black background during a running focus while the thought, rhythm, and time remain legible.
 - Main thought and all later thoughts support one level of subthoughts.
 - A 20-character north star sits beside the distraction count, persists across day changes, exports to Markdown, and is editable by click or `G`.
+- The shortcut whisper belongs only to the distraction counter. Hovering the north star leaves it visible and editable; visible copy and Markdown call it “north star,” not “One Thing.”
+- Custom-drawn content now has a stable VoiceOver reading order and semantic actions for the date/time, main thought, steps, Today list, timer choices, distraction count, north star, and add-thought invitation.
 - First launch is a genuinely empty page with a rotating bank of quiet invitations. Exact untouched demo pages from older builds migrate to empty without disturbing settings or distraction counts.
 - Checks, promotion, contextual right-click actions, native undo, timer reset, copy-bank fresh-day reset, bottom-up reminders, daily distraction increment/decrement, embedded hover hotkeys, seven-day history, manual Markdown export, and automatic midnight/next-launch day archives implemented.
 - Compact layout verified from 900 × 600 upward in both split and stacked compositions. Main copy wraps and fits down, low-priority subthoughts hide first, timer instructions own their vertical space, panel-side changes reserve the distraction counter, and resize invalidation prevents stale or clipped canvases after display changes.
@@ -33,10 +35,12 @@ Read `README.md`, `PHILOSOPHY.md`, then `Docs/design-reference.png`.
 - Settled idle: 0.0% CPU between minute redraws. The installed 1.4.1 process sampled at 7.3–8.5 MB RSS after launch; Activity Monitor may report a larger physical footprint for a portrait full-screen backing surface, but repeated samples remain stable rather than growing like a leak.
 - App icon source: `Assets/Sidetrack-icon-source.png`.
 - GitHub product portrait: `Docs/Sidetrack-product-portrait.png`; 2400 × 1350, fictional task data, no private user content.
-- Built app: `build/Sidetrack.app`; use `build/Sidetrack.app.zip` for installation because the synced workspace can decorate unpacked bundle folders with unrelated Finder icon metadata after signing.
-- Installed app: `/Applications/Sidetrack.app`, version 1.4.1 (build 4), ad-hoc signature verified. Installed executable SHA-256: `2ea8a191366ae71671d81cd606187e0b3080fa7f5d9cc5ea36166d5b4750041d`, matching `build/Sidetrack.app`. The replaced 1.4.0 bundle is reversible at `/Applications/Sidetrack.app.previous-1.4.0`; older backups remain untouched. The current launch lands full-screen on the left vertical display by default.
+- Release line: `v1.4.2` (build 5). See `CHANGELOG.md` for the complete human-readable delta.
+- Built app: `build/Sidetrack.app`; use `build/Sidetrack.app.zip` for installation because the synced workspace can decorate unpacked bundle folders with unrelated Finder icon metadata after signing. The ZIP retains the `Sidetrack.app` wrapper.
+- The release build is universal (`arm64` + `x86_64`), and both slices declare macOS 13.0 as their deployment target. An x86_64 launch under Rosetta and the native arm64 UI pass both completed without a startup failure.
+- Local installation target: `/Applications/Sidetrack.app`. Verify its version, signature, architectures, and executable hash against the built app after every install; preserve the replaced bundle as a versioned backup.
 - Public repository: `https://github.com/bomkino/sidetrack`; default branch `main`; CC0-1.0 detected.
-- Public main: `178b0d0110e8d23d1ef27d046186e384aed5212f`; release: `v1.4.1`; archive SHA-256: `5ff2ba5ee9afe895cd67b4785b8ec0e1188f7eb918b286cc550cf3bae09a7467`; macOS CI run `31291700605` passed.
+- Release truth is not inferred from this file. Read back GitHub `main`, the `v1.4.2` tag and release asset, exact CI, and the installed bundle before claiming they match.
 
 ## Finish next
 

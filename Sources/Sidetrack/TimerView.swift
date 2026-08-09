@@ -233,6 +233,8 @@ final class TimerView: NSView {
     private var firstOption = NSRect.zero
     private var secondOption = NSRect.zero
     private let overrunEffectView = OverrunEffectView(frame: .zero)
+    private let firstChoiceAccessibility = QuietAccessibilityElement()
+    private let secondChoiceAccessibility = QuietAccessibilityElement()
 
     override var isFlipped: Bool { true }
 
@@ -243,6 +245,12 @@ final class TimerView: NSView {
         addSubview(overrunEffectView)
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
+        setAccessibilityEnabled(true)
+        for element in [firstChoiceAccessibility, secondChoiceAccessibility] {
+            element.setAccessibilityParent(self)
+            element.setAccessibilityRole(.button)
+            element.setAccessibilityEnabled(true)
+        }
         updateAccessibility()
     }
 
@@ -251,6 +259,7 @@ final class TimerView: NSView {
     override func layout() {
         super.layout()
         overrunEffectView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 30 * textScale)
+        updateChoiceRects()
         overrunEffectView.configure(
             text: choiceLine() ?? "",
             scale: textScale,
@@ -278,6 +287,7 @@ final class TimerView: NSView {
             layer?.add(transition, forKey: "quiet-shift")
         }
         updateAccessibility()
+        updateChoiceRects()
         overrunEffectView.configure(
             text: choiceLine() ?? "",
             scale: textScale,
@@ -294,37 +304,86 @@ final class TimerView: NSView {
 
         let remaining = TimerEngine.secondsRemaining(timer)
         let effectIsVisible = overrunCue.isActive && choiceLine() != nil
+        updateChoiceRects()
         switch timer.status {
         case .awaitingWorkChoice:
             let isLong = timer.completedCyclesInSet + 1 >= settings.cyclesPerSet
             let rest = isLong ? "long rest" : "short rest"
             if !effectIsVisible {
                 drawText("Focus finished  ·  take a \(rest)?",
-                         in: NSRect(x: 0, y: 0, width: bounds.width, height: 27),
+                         in: NSRect(x: 0, y: 0, width: bounds.width, height: 27 * textScale),
                          font: Typography.italic(17 * textScale), color: Palette.paper,
                          alignment: textAlignment)
             }
-            firstOption = NSRect(x: 0, y: 27, width: 92, height: 24)
-            secondOption = NSRect(x: 98, y: 27, width: 112, height: 24)
             drawOption("Begin rest", key: "B", in: firstOption)
             drawOption("·  Keep working", key: "K", in: secondOption)
         case .awaitingBreakChoice:
             if !effectIsVisible {
                 drawText("Rest finished  ·  ready to focus again?",
-                         in: NSRect(x: 0, y: 0, width: bounds.width, height: 27),
+                         in: NSRect(x: 0, y: 0, width: bounds.width, height: 27 * textScale),
                          font: Typography.italic(17 * textScale), color: Palette.paper,
                          alignment: textAlignment)
             }
-            firstOption = NSRect(x: 0, y: 27, width: 86, height: 24)
-            secondOption = NSRect(x: 92, y: 27, width: 70, height: 24)
             drawOption("Start focus", key: "S", in: firstOption)
             drawOption("·  Not yet", key: "N", in: secondOption)
         default:
-            drawStatusLine(statusLine(remaining: remaining), in: NSRect(x: 0, y: 0, width: bounds.width, height: 29))
+            drawStatusLine(statusLine(remaining: remaining), in: NSRect(x: 0, y: 0, width: bounds.width, height: 29 * textScale))
             drawText(clickInstruction(),
-                     in: NSRect(x: 0, y: 26, width: bounds.width, height: 22),
-                     font: Typography.roman(11 * textScale), color: Palette.faint,
+                     in: NSRect(x: 0, y: 26 * textScale, width: bounds.width, height: 22 * textScale),
+                     font: Typography.roman(11 * textScale), color: Palette.quiet,
                      alignment: textAlignment, tracking: 0.1)
+        }
+    }
+
+    private func updateChoiceRects() {
+        let texts: (String, String)
+        switch timer.status {
+        case .awaitingWorkChoice: texts = ("Begin rest", "·  Keep working")
+        case .awaitingBreakChoice: texts = ("Start focus", "·  Not yet")
+        default:
+            firstOption = .zero
+            secondOption = .zero
+            return
+        }
+
+        let font = Typography.roman(13 * textScale)
+        let firstWidth = ceil((texts.0 as NSString).size(withAttributes: [.font: font]).width) + 5 * textScale
+        let secondWidth = ceil((texts.1 as NSString).size(withAttributes: [.font: font]).width) + 5 * textScale
+        let gap = 7 * textScale
+        let groupWidth = min(bounds.width, firstWidth + gap + secondWidth)
+        let startX: CGFloat
+        switch textAlignment {
+        case .right: startX = max(0, bounds.width - groupWidth)
+        case .center: startX = max(0, (bounds.width - groupWidth) * 0.5)
+        default: startX = 0
+        }
+        let y = 27 * textScale
+        let height = 24 * textScale
+        firstOption = NSRect(x: startX, y: y, width: firstWidth, height: height)
+        secondOption = NSRect(x: startX + firstWidth + gap, y: y, width: secondWidth, height: height)
+        updateChoiceAccessibility(texts: texts)
+    }
+
+    private func updateChoiceAccessibility(texts: (String, String)) {
+        firstChoiceAccessibility.setAccessibilityFrameInParentSpace(firstOption.insetBy(dx: -5, dy: -8))
+        secondChoiceAccessibility.setAccessibilityFrameInParentSpace(secondOption.insetBy(dx: -5, dy: -8))
+        firstChoiceAccessibility.setAccessibilityLabel(texts.0.replacingOccurrences(of: "·  ", with: ""))
+        secondChoiceAccessibility.setAccessibilityLabel(texts.1.replacingOccurrences(of: "·  ", with: ""))
+
+        switch timer.status {
+        case .awaitingWorkChoice:
+            firstChoiceAccessibility.setAccessibilityHelp("Begin the suggested rest.")
+            secondChoiceAccessibility.setAccessibilityHelp("Continue with five more minutes of focus.")
+            firstChoiceAccessibility.onPress = { [weak self] in self?.onTakeBreak?(); return self != nil }
+            secondChoiceAccessibility.onPress = { [weak self] in self?.onKeepWorking?(); return self != nil }
+        case .awaitingBreakChoice:
+            firstChoiceAccessibility.setAccessibilityHelp("Begin a new focus session.")
+            secondChoiceAccessibility.setAccessibilityHelp("Leave this question waiting.")
+            firstChoiceAccessibility.onPress = { [weak self] in self?.onStartAgain?(); return self != nil }
+            secondChoiceAccessibility.onPress = { [weak self] in return self != nil }
+        default:
+            firstChoiceAccessibility.onPress = nil
+            secondChoiceAccessibility.onPress = nil
         }
     }
 
@@ -405,14 +464,26 @@ final class TimerView: NSView {
         let remaining = TimerEngine.secondsRemaining(timer)
         switch timer.status {
         case .awaitingWorkChoice:
+            setAccessibilityRole(.group)
             setAccessibilityLabel("Focus finished. Take a rest?")
-            setAccessibilityHelp(accessibilityHelp("Press B to begin the break or K to keep working."))
+            setAccessibilityHelp(accessibilityHelp("Choose Begin rest or Keep working."))
         case .awaitingBreakChoice:
+            setAccessibilityRole(.group)
             setAccessibilityLabel("Rest finished. Ready to focus again?")
-            setAccessibilityHelp(accessibilityHelp("Press S to start focus or N to wait."))
+            setAccessibilityHelp(accessibilityHelp("Choose Start focus or Not yet."))
         default:
+            setAccessibilityRole(.button)
             setAccessibilityLabel(statusLine(remaining: remaining))
             setAccessibilityHelp(clickInstruction())
+        }
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        switch timer.status {
+        case .awaitingWorkChoice, .awaitingBreakChoice:
+            return [firstChoiceAccessibility, secondChoiceAccessibility]
+        default:
+            return nil
         }
     }
 
@@ -427,21 +498,22 @@ final class TimerView: NSView {
 
     override func accessibilityPerformPress() -> Bool {
         switch timer.status {
-        case .awaitingWorkChoice: onTakeBreak?()
-        case .awaitingBreakChoice: onStartAgain?()
-        default: onToggle?()
+        case .awaitingWorkChoice, .awaitingBreakChoice: return false
+        default:
+            onToggle?()
+            return true
         }
-        return true
     }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         switch timer.status {
         case .awaitingWorkChoice:
-            if firstOption.contains(point) { onTakeBreak?() }
-            else if secondOption.contains(point) { onKeepWorking?() }
+            if firstOption.insetBy(dx: -5, dy: -8).contains(point) { onTakeBreak?() }
+            else if secondOption.insetBy(dx: -5, dy: -8).contains(point) { onKeepWorking?() }
         case .awaitingBreakChoice:
-            if firstOption.contains(point) { onStartAgain?() }
+            if firstOption.insetBy(dx: -5, dy: -8).contains(point) { onStartAgain?() }
+            else if secondOption.insetBy(dx: -5, dy: -8).contains(point) { return }
         default:
             onToggle?()
         }

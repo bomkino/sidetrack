@@ -6,7 +6,7 @@ Sidetrack is a quiet second-screen focus display for macOS. One sentence holds t
 
 No account. No sync. No notifications. No streaks. No network calls. No Chromium.
 
-[Download the latest macOS app](https://github.com/bomkino/sidetrack/releases/latest) · macOS 13 or newer · Apple silicon and Intel
+[Download the latest macOS app](https://github.com/bomkino/sidetrack/releases/latest) · [Changelog](CHANGELOG.md) · macOS 13 or newer · Apple silicon and Intel
 
 ## Why
 
@@ -33,8 +33,9 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - If a finished focus or rest waits for you, it whispers rather than notifying: one slow text breath at 2× the phase length, a glyph-aware hairline at 3× that leaves room for descenders, both at 4×, then silence at 5× for a likely away-from-keyboard stretch.
 - Speaks the date and time through changing light: dawn, twilight, moonlight, and the hours between.
 - Displays its clock 15 minutes ahead by default; the offset is editable in Preferences and never changes pomodoro timing.
-- Counts distractions with a tiny daily `0000` clicker; hover reveals a soft decrement and the keyboard map, while right-click shows seven days.
+- Counts distractions with a tiny daily `0000` clicker; hovering the number reveals a soft decrement and the keyboard map, while right-click shows seven days. The neighboring north star keeps its own hover and click space.
 - Keeps a short, persistent north star beside the clicker—20 characters, carried from day to day. Click it or press `G` to rewrite it.
+- Gives VoiceOver a stable path through the date and time, main thought, steps, Today list, timer choices, distraction count, and north star—even though the page is custom drawn.
 - Saves the finished day automatically as readable Markdown after midnight or on the next launch; manual export remains available.
 - Cycles through a small bank of human placeholders when you begin fresh.
 - Begins with an empty page rather than pretending a demo task belongs to you.
@@ -93,7 +94,7 @@ Scripts/test.sh
 Scripts/build-app.sh
 ```
 
-The unpacked app appears at `build/Sidetrack.app`; a clean signed install archive appears beside it as `build/Sidetrack.app.zip`. Build uses `swiftc` directly so no full Xcode install is required.
+The unpacked app appears at `build/Sidetrack.app`; a clean signed install archive appears beside it as `build/Sidetrack.app.zip`. The build creates one universal binary, verifies its Intel and Apple-silicon slices, and pins both to macOS 13. It uses `swiftc` directly, so no full Xcode install is required.
 
 Small, careful contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing Sidetrack’s interaction or visual language.
 
@@ -107,7 +108,7 @@ Measured in full-screen on a 1920 × 1080 logical second display after the curre
 
 - `0.0%` CPU between minute updates; one brief redraw on the minute, then the process sleeps again
 - roughly `44–55 MB` resident memory in the final windowed resize pass; on a 2160 × 3840 physical portrait display, macOS may retain about `90 MB` of physical footprint for the native full-screen backing surface, stable while idle rather than a growing allocation
-- `566 KB` executable; `3.2 MB` installed app bundle including font and icon
+- `1.5 MB` universal executable; `4.1 MB` installed app bundle including font and icon
 
 The compact layout survived 40 rapid resizes across 900 × 600, 1000 × 700, 1200 × 760, 1440 × 900, and 1920 × 1049. A separate burst of 202 timer and counter actions completed in under one second without a lost write or damaged backup.
 

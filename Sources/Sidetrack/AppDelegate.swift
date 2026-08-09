@@ -294,10 +294,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         taskMenu.addItem(withTitle: "Add Thought", action: #selector(addTask), keyEquivalent: "n")
         let subtask = taskMenu.addItem(withTitle: "Add Step", action: #selector(addSubtask), keyEquivalent: "n")
         subtask.keyEquivalentModifierMask = [.command, .shift]
-        taskMenu.addItem(withTitle: "Edit Main Task", action: #selector(editMain), keyEquivalent: "e")
-        taskMenu.addItem(withTitle: "Promote Next", action: #selector(promoteNext), keyEquivalent: "p")
+        taskMenu.addItem(withTitle: "Rewrite Main Thought", action: #selector(editMain), keyEquivalent: "e")
+        taskMenu.addItem(withTitle: "Bring Next Thought Forward", action: #selector(promoteNext), keyEquivalent: "p")
         taskMenu.addItem(withTitle: "Check Next Step", action: #selector(completeNextSubtask), keyEquivalent: "")
-        taskMenu.addItem(withTitle: "Complete Main Task", action: #selector(completeMain), keyEquivalent: "")
+        taskMenu.addItem(withTitle: "Complete Main Thought", action: #selector(completeMain), keyEquivalent: "")
         taskMenu.addItem(.separator())
         taskMenu.addItem(withTitle: "Reset Timer", action: #selector(resetTimer), keyEquivalent: "")
         taskMenu.addItem(withTitle: "Begin Fresh Day…", action: #selector(startFreshDay), keyEquivalent: "")

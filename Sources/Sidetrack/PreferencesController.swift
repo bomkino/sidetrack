@@ -229,7 +229,11 @@ final class PreferencesController: NSWindowController, NSTextFieldDelegate {
     }
 
     private static func scaleLabel(_ value: Double) -> String {
-        String(format: "%.2gx", value)
+        let tenths = (value * 10).rounded() / 10
+        if abs(value - tenths) < 0.001 {
+            return String(format: "%.1fx", value)
+        }
+        return String(format: "%.2fx", value)
     }
 
     private func label(_ text: String, size: CGFloat, color: NSColor) -> NSTextField {

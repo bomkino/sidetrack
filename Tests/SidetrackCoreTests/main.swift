@@ -150,7 +150,7 @@ let exported = MarkdownExporter.render(exportSample, date: date, calendar: calen
 expect(exported.contains("# Friday, 17 July 2026"), "Markdown export has day heading")
 expect(exported.contains("- [ ] Shape the opening until it breathes"), "Markdown export contains main thought")
 expect(exported.contains("  - [ ] Watch once without reaching for the controls"), "Markdown export contains subthoughts")
-expect(exported.contains("One thing: $10k"), "Markdown export carries the persistent One Thing")
+expect(exported.contains("North star: $10k"), "Markdown export carries the persistent north star")
 expect(exported.contains("## Distractions\n0"), "Markdown export contains daily distraction count")
 
 let longOneThing = AppData(oneThing: "1234567890123456789012345")

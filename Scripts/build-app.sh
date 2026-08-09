@@ -6,25 +6,60 @@ BUILD="$ROOT/build/release"
 APP="$ROOT/build/Sidetrack.app"
 ARCHIVE="$ROOT/build/Sidetrack.app.zip"
 ICONSET="$BUILD/Sidetrack.iconset"
+DEPLOYMENT_TARGET="13.0"
+ARCHITECTURES=(arm64 x86_64)
 
-rm -rf "$APP" "$ICONSET"
-rm -f "$ARCHIVE"
-mkdir -p "$BUILD/ModuleCache" "$ICONSET"
+rm -rf "$APP" "$ICONSET" "$BUILD/arm64" "$BUILD/x86_64"
+rm -f \
+  "$ARCHIVE" \
+  "$BUILD/Sidetrack" \
+  "$BUILD/libSidetrackCore.a" \
+  "$BUILD/SidetrackCore.abi.json" \
+  "$BUILD/SidetrackCore.swiftdoc" \
+  "$BUILD/SidetrackCore.swiftmodule" \
+  "$BUILD/SidetrackCore.swiftsourceinfo"
+mkdir -p "$ICONSET"
 
-swiftc -O \
-  -parse-as-library \
-  -emit-library -static \
-  -emit-module -module-name SidetrackCore \
-  -module-cache-path "$BUILD/ModuleCache" \
-  "$ROOT"/Sources/SidetrackCore/*.swift \
-  -o "$BUILD/libSidetrackCore.a"
+for arch in "${ARCHITECTURES[@]}"; do
+  target="${arch}-apple-macosx${DEPLOYMENT_TARGET}"
+  arch_build="$BUILD/$arch"
+  mkdir -p "$arch_build/ModuleCache"
 
-swiftc -O \
-  -I "$BUILD" -L "$BUILD" -lSidetrackCore \
-  -framework AppKit -framework QuartzCore \
-  -module-cache-path "$BUILD/ModuleCache" \
-  "$ROOT"/Sources/Sidetrack/*.swift \
-  -o "$BUILD/Sidetrack"
+  swiftc -O -target "$target" \
+    -parse-as-library \
+    -emit-library -static \
+    -emit-module -module-name SidetrackCore \
+    -emit-module-path "$arch_build/SidetrackCore.swiftmodule" \
+    -module-cache-path "$arch_build/ModuleCache" \
+    "$ROOT"/Sources/SidetrackCore/*.swift \
+    -o "$arch_build/libSidetrackCore.a"
+
+  swiftc -O -target "$target" \
+    -I "$arch_build" -L "$arch_build" -lSidetrackCore \
+    -framework AppKit -framework QuartzCore \
+    -module-cache-path "$arch_build/ModuleCache" \
+    "$ROOT"/Sources/Sidetrack/*.swift \
+    -o "$arch_build/Sidetrack"
+done
+
+lipo -create \
+  "$BUILD/arm64/Sidetrack" \
+  "$BUILD/x86_64/Sidetrack" \
+  -output "$BUILD/Sidetrack"
+
+built_architectures="$(lipo "$BUILD/Sidetrack" -archs)"
+for arch in "${ARCHITECTURES[@]}"; do
+  if [[ " $built_architectures " != *" $arch "* ]]; then
+    echo "Missing required architecture: $arch" >&2
+    exit 1
+  fi
+
+  built_target="$(vtool -arch "$arch" -show-build "$BUILD/Sidetrack" | awk '$1 == "minos" { print $2; exit }')"
+  if [[ "$built_target" != "$DEPLOYMENT_TARGET" ]]; then
+    echo "Unexpected deployment target for $arch: $built_target" >&2
+    exit 1
+  fi
+done
 
 for spec in \
   "16 icon_16x16.png" \
@@ -55,7 +90,7 @@ find "$APP" -name $'Icon\r' -type f -delete
 xattr -cr "$APP"
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
-ditto -c -k --norsrc --noextattr "$APP" "$ARCHIVE"
+ditto -c -k --keepParent --norsrc --noextattr "$APP" "$ARCHIVE"
 
 echo "$APP"
 echo "$ARCHIVE"

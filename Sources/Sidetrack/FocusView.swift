@@ -47,6 +47,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private var subtaskRects: [(UUID, NSRect, NSRect)] = []
     private var sideRects: [(UUID, NSRect, NSRect, NSRect)] = []
     private var sideSubtaskRects: [(UUID, UUID, NSRect, NSRect)] = []
+    private var accessibilityElementCache: [String: QuietAccessibilityElement] = [:]
+    private var accessibilityReadingOrder: [Any] = []
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
@@ -68,6 +70,9 @@ final class FocusView: NSView, NSTextFieldDelegate {
         _ = rollOverDayIfNeeded()
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Sidetrack focus page")
         addSubview(timerView)
         addSubview(counterView)
         configureTimerActions()
@@ -127,6 +132,13 @@ final class FocusView: NSView, NSTextFieldDelegate {
         let g = makeGeometry()
         drawMain(g)
         drawToday(g)
+        updateContentAccessibility(g)
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        var children = accessibilityReadingOrder
+        if let editor { children.append(editor) }
+        return children.isEmpty ? [timerView, counterView] : children
     }
 
     func minuteChanged() {
@@ -317,7 +329,6 @@ final class FocusView: NSView, NSTextFieldDelegate {
         case "p": promoteNext()
         case "c": completeMain()
         case "k": completeNextSubtask()
-        case "x": completeMain()
         case "d": incrementDistraction()
         case "u": decrementDistraction()
         case "r": startFreshDay()
@@ -412,7 +423,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
             ], event: event)
             return
         }
-        var items = [("Add a thought", "new-thought"), ("Rewrite One Thing", "one-thing-edit")]
+        var items = [("Add a thought", "new-thought"), ("Rewrite north star", "one-thing-edit")]
         if data.mainTask != nil { items.insert(("Add a step", "main-add-sub"), at: 1) }
         items.append(contentsOf: timerContextChoices())
         items.append(("Reset timer", "timer-reset"))
@@ -900,6 +911,208 @@ final class FocusView: NSView, NSTextFieldDelegate {
         context.restoreGState()
     }
 
+    private func updateContentAccessibility(_ g: Geometry) {
+        var usedKeys = Set<String>()
+        var mainOrder: [Any] = []
+        var todayOrder: [Any] = []
+
+        let displayedDate = TimeLanguage.adjusted(Date(), offsetMinutes: data.settings.clockOffsetMinutes)
+        let dateLabel = "\(TimeLanguage.dayPhase(displayedDate)). \(TimeLanguage.dateLine(displayedDate)), \(TimeLanguage.clockPhrase(displayedDate))."
+        let dateElement = configureAccessibilityElement(
+            key: "date-time",
+            role: .staticText,
+            frame: NSRect(x: g.sideX, y: g.sideHeadingY, width: g.sideWidth, height: 58),
+            label: dateLabel,
+            help: nil,
+            value: nil,
+            onPress: nil,
+            actions: []
+        )
+        usedKeys.insert("date-time")
+
+        let mainLabel: String
+        let mainHelp: String
+        if let main = data.mainTask {
+            mainLabel = "Main thought: \(main.title)"
+            mainHelp = "Press to rewrite the main thought."
+        } else {
+            mainLabel = "Main thought is empty. \(CopyBank.mainPrompt(index: data.copyIndex))"
+            mainHelp = "Press to write the main thought."
+        }
+        var mainActions: [NSAccessibilityCustomAction] = []
+        if data.mainTask != nil {
+            mainActions = [
+                accessibilityAction("Add a step") { [weak self] in self?.addSubtask(); return self != nil },
+                accessibilityAction("Complete main thought") { [weak self] in self?.completeMain(); return self != nil },
+                accessibilityAction("Delete main thought") { [weak self] in self?.deleteMainThought(); return self != nil }
+            ]
+        }
+        let mainElement = configureAccessibilityElement(
+            key: "main",
+            role: .button,
+            frame: mainRect,
+            label: mainLabel,
+            help: mainHelp,
+            value: nil,
+            onPress: { [weak self] in self?.editMain(); return self != nil },
+            actions: mainActions
+        )
+        usedKeys.insert("main")
+        mainOrder.append(mainElement)
+
+        for (id, check, title) in subtaskRects {
+            guard let step = data.mainTask?.subtasks.first(where: { $0.id == id }) else { continue }
+            let key = "main-step-\(id.uuidString)"
+            let state = step.isCompleted ? "completed" : "open"
+            let element = configureAccessibilityElement(
+                key: key,
+                role: .checkBox,
+                frame: check.union(title).insetBy(dx: -5, dy: -4),
+                label: "Step, \(state): \(step.title)",
+                help: "Press to check or uncheck this step.",
+                value: step.isCompleted ? 1 : 0,
+                onPress: { [weak self] in self?.toggleSubtask(id); return self != nil },
+                actions: [
+                    accessibilityAction("Rewrite step") { [weak self] in
+                        self?.beginEditing(.subtask(id), text: step.title)
+                        return self != nil
+                    },
+                    accessibilityAction("Delete step") { [weak self] in self?.deleteMainStep(id); return self != nil }
+                ]
+            )
+            usedKeys.insert(key)
+            mainOrder.append(element)
+        }
+
+        let sortedSideRects = sideRects.sorted { $0.2.minY < $1.2.minY }
+        for (id, check, title, _) in sortedSideRects {
+            guard let task = data.today.first(where: { $0.id == id }) else { continue }
+            let key = "today-\(id.uuidString)"
+            let state = task.isCompleted ? "completed" : "open"
+            let help = task.isCompleted
+                ? "Press to uncheck this thought. Additional actions can rewrite or delete it."
+                : "Press to bring this thought forward. Additional actions can rewrite, check, or delete it."
+            let element = configureAccessibilityElement(
+                key: key,
+                role: .button,
+                frame: check.union(title).insetBy(dx: -5, dy: -4),
+                label: "Today thought, \(state): \(task.title)",
+                help: help,
+                value: nil,
+                onPress: { [weak self] in
+                    guard let self else { return false }
+                    if task.isCompleted {
+                        self.toggleSide(id)
+                    } else if let index = self.data.today.firstIndex(where: { $0.id == id }) {
+                        self.promote(at: index)
+                    }
+                    return true
+                },
+                actions: [
+                    accessibilityAction("Rewrite thought") { [weak self] in
+                        self?.beginEditing(.side(id), text: task.title)
+                        return self != nil
+                    },
+                    accessibilityAction(task.isCompleted ? "Uncheck thought" : "Check thought") { [weak self] in
+                        self?.toggleSide(id)
+                        return self != nil
+                    },
+                    accessibilityAction("Add a subthought") { [weak self] in
+                        self?.beginEditing(.newSideSubtask(id), text: "")
+                        return self != nil
+                    },
+                    accessibilityAction("Delete thought") { [weak self] in self?.deleteTodayThought(id); return self != nil }
+                ]
+            )
+            usedKeys.insert(key)
+            todayOrder.append(element)
+
+            let children = sideSubtaskRects
+                .filter { $0.0 == id }
+                .sorted { $0.3.minY < $1.3.minY }
+            for (_, subtaskID, subCheck, subTitle) in children {
+                guard let subtask = task.subtasks.first(where: { $0.id == subtaskID }) else { continue }
+                let subKey = "today-step-\(id.uuidString)-\(subtaskID.uuidString)"
+                let subState = subtask.isCompleted ? "completed" : "open"
+                let subElement = configureAccessibilityElement(
+                    key: subKey,
+                    role: .checkBox,
+                    frame: subCheck.union(subTitle).insetBy(dx: -5, dy: -4),
+                    label: "Subthought, \(subState): \(subtask.title)",
+                    help: "Press to check or uncheck this subthought.",
+                    value: subtask.isCompleted ? 1 : 0,
+                    onPress: { [weak self] in
+                        self?.toggleSideSubtask(taskID: id, subtaskID: subtaskID)
+                        return self != nil
+                    },
+                    actions: [
+                        accessibilityAction("Rewrite subthought") { [weak self] in
+                            self?.beginEditing(.sideSubtask(id, subtaskID), text: subtask.title)
+                            return self != nil
+                        },
+                        accessibilityAction("Delete subthought") { [weak self] in
+                            self?.deleteTodaySubthought(taskID: id, subtaskID: subtaskID)
+                            return self != nil
+                        }
+                    ]
+                )
+                usedKeys.insert(subKey)
+                todayOrder.append(subElement)
+            }
+        }
+
+        let newThoughtElement = configureAccessibilityElement(
+            key: "new-thought",
+            role: .button,
+            frame: newTaskRect.insetBy(dx: -5, dy: -5),
+            label: "Hold a thought",
+            help: "Press to write down a thought for today.",
+            value: nil,
+            onPress: { [weak self] in self?.addTask(); return self != nil },
+            actions: []
+        )
+        usedKeys.insert("new-thought")
+        todayOrder.append(newThoughtElement)
+
+        accessibilityElementCache = accessibilityElementCache.filter { usedKeys.contains($0.key) }
+        let todayFirst = g.isVertical && data.display.panelOrder == .todayFirst
+        if todayFirst {
+            accessibilityReadingOrder = [dateElement, counterView] + todayOrder
+                + Array(mainOrder.prefix(1)) + [timerView] + Array(mainOrder.dropFirst())
+        } else {
+            accessibilityReadingOrder = Array(mainOrder.prefix(1)) + [timerView]
+                + Array(mainOrder.dropFirst()) + [dateElement] + todayOrder + [counterView]
+        }
+    }
+
+    private func configureAccessibilityElement(
+        key: String,
+        role: NSAccessibility.Role,
+        frame: NSRect,
+        label: String,
+        help: String?,
+        value: Any?,
+        onPress: (() -> Bool)?,
+        actions: [NSAccessibilityCustomAction]
+    ) -> QuietAccessibilityElement {
+        let element = accessibilityElementCache[key] ?? QuietAccessibilityElement()
+        accessibilityElementCache[key] = element
+        element.setAccessibilityParent(self)
+        element.setAccessibilityRole(role)
+        element.setAccessibilityEnabled(true)
+        element.setAccessibilityFrameInParentSpace(frame)
+        element.setAccessibilityLabel(label)
+        element.setAccessibilityHelp(help)
+        element.setAccessibilityValue(value)
+        element.onPress = onPress
+        element.setAccessibilityCustomActions(actions.isEmpty ? nil : actions)
+        return element
+    }
+
+    private func accessibilityAction(_ name: String, perform: @escaping () -> Bool) -> NSAccessibilityCustomAction {
+        NSAccessibilityCustomAction(name: name, handler: perform)
+    }
+
     private func drawTodayTask(
         _ task: TaskItem,
         at y: CGFloat,
@@ -1023,6 +1236,35 @@ final class FocusView: NSView, NSTextFieldDelegate {
         window?.undoManager?.setActionName(actionName)
         data = replacement
         changed()
+    }
+
+    private func deleteMainThought() {
+        guard data.mainTask != nil else { return }
+        var next = data
+        next.mainTask = nil
+        replaceData(next, actionName: "Delete Main Thought")
+    }
+
+    private func deleteMainStep(_ id: UUID) {
+        var next = data
+        guard let index = next.mainTask?.subtasks.firstIndex(where: { $0.id == id }) else { return }
+        next.mainTask?.subtasks.remove(at: index)
+        replaceData(next, actionName: "Delete Step")
+    }
+
+    private func deleteTodayThought(_ id: UUID) {
+        var next = data
+        guard let index = next.today.firstIndex(where: { $0.id == id }) else { return }
+        next.today.remove(at: index)
+        replaceData(next, actionName: "Delete Thought")
+    }
+
+    private func deleteTodaySubthought(taskID: UUID, subtaskID: UUID) {
+        var next = data
+        guard let taskIndex = next.today.firstIndex(where: { $0.id == taskID }),
+              let subtaskIndex = next.today[taskIndex].subtasks.firstIndex(where: { $0.id == subtaskID }) else { return }
+        next.today[taskIndex].subtasks.remove(at: subtaskIndex)
+        replaceData(next, actionName: "Delete Subthought")
     }
 
     private func toggleSubtask(_ id: UUID) {

@@ -16,7 +16,7 @@ public enum MarkdownExporter {
         }
         if !data.oneThing.isEmpty {
             lines.append("")
-            lines.append("One thing: \(clean(data.oneThing))")
+            lines.append("North star: \(clean(data.oneThing))")
         }
         lines.append("")
         lines.append("## Later, today")

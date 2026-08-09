@@ -6,6 +6,7 @@ final class CounterView: NSView {
     var count = 0 {
         didSet {
             setAccessibilityValue(count)
+            updateAccessibilityLabel()
             needsDisplay = true
         }
     }
@@ -14,10 +15,16 @@ final class CounterView: NSView {
     var onEditOneThing: (() -> Void)?
     var history: (() -> [(label: String, count: Int)])?
     var textScale: CGFloat = 1 {
-        didSet { needsDisplay = true }
+        didSet {
+            needsDisplay = true
+            updateTrackingAreas()
+        }
     }
     var oneThing = "" {
-        didSet { needsDisplay = true }
+        didSet {
+            updateAccessibilityLabel()
+            needsDisplay = true
+        }
     }
     var oneThingPlaceholder = "a small north star" {
         didSet { needsDisplay = true }
@@ -33,6 +40,10 @@ final class CounterView: NSView {
 
     private var countRect: NSRect {
         NSRect(x: 31 * textScale, y: 12 * textScale, width: 58 * textScale, height: 24 * textScale)
+    }
+
+    private var counterHoverRect: NSRect {
+        minusRect.union(countRect).insetBy(dx: -6 * textScale, dy: -5 * textScale)
     }
 
     /// The small field beside the count. It stays a generous hit target while
@@ -56,18 +67,24 @@ final class CounterView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel("Distractions and One Thing")
-        setAccessibilityHelp("Press to count one distraction. Press U to undo. Click One Thing or press G to rewrite it.")
+        setAccessibilityEnabled(true)
+        updateAccessibilityLabel()
+        setAccessibilityHelp("Press to count one distraction. Additional actions can undo a count or rewrite the north star.")
         setAccessibilityValue(count)
+        setAccessibilityCustomActions([
+            NSAccessibilityCustomAction(name: "Undo one distraction", target: self, selector: #selector(accessibilityUndo(_:))),
+            NSAccessibilityCustomAction(name: "Rewrite north star", target: self, selector: #selector(accessibilityRewriteNorthStar(_:)))
+        ])
     }
 
     required init?(coder: NSCoder) { nil }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
+        hovered = false
         trackingAreas.forEach(removeTrackingArea)
         addTrackingArea(NSTrackingArea(
-            rect: bounds,
+            rect: counterHoverRect,
             options: [.mouseEnteredAndExited, .activeInKeyWindow],
             owner: self
         ))
@@ -99,7 +116,7 @@ final class CounterView: NSView {
         let heading = NSMenuItem(title: "Distractions, quietly counted", action: nil, keyEquivalent: "")
         heading.isEnabled = false
         menu.addItem(heading)
-        let rewrite = NSMenuItem(title: "Rewrite One Thing", action: #selector(editOneThing), keyEquivalent: "g")
+        let rewrite = NSMenuItem(title: "Rewrite North Star", action: #selector(editOneThing), keyEquivalent: "g")
         rewrite.target = self
         menu.addItem(rewrite)
         menu.addItem(.separator())
@@ -119,6 +136,16 @@ final class CounterView: NSView {
         onEditOneThing?()
     }
 
+    @objc private func accessibilityUndo(_ action: NSAccessibilityCustomAction) -> Bool {
+        onDecrement?()
+        return true
+    }
+
+    @objc private func accessibilityRewriteNorthStar(_ action: NSAccessibilityCustomAction) -> Bool {
+        onEditOneThing?()
+        return true
+    }
+
     override func accessibilityPerformPress() -> Bool {
         onIncrement?()
         return true
@@ -132,7 +159,7 @@ final class CounterView: NSView {
                 ("Distraction", "D"), ("Undo", "U"), ("Goal", "G")
             ], in: NSRect(x: 105 * textScale, y: 2, width: bounds.width - 105 * textScale, height: 22 * textScale))
             drawKeyWords([
-                ("New thought", "N"), ("rEwrite", "E"), ("Timer", "T"), ("Reset", "R")
+                ("New thought", "N"), ("rEwrite", "E"), ("Timer", "T"), ("fResh day", "R")
             ], in: NSRect(x: 105 * textScale, y: 23 * textScale, width: bounds.width - 105 * textScale, height: 22 * textScale))
         }
         drawText(
@@ -160,11 +187,16 @@ final class CounterView: NSView {
         if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             let transition = CATransition()
             transition.type = .fade
-            transition.duration = 0.8
-            transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            transition.duration = 0.18
+            transition.timingFunction = CAMediaTimingFunction(name: .easeOut)
             layer?.add(transition, forKey: "counter-whisper")
         }
         needsDisplay = true
+    }
+
+    private func updateAccessibilityLabel() {
+        let northStar = oneThing.isEmpty ? "empty" : oneThing
+        setAccessibilityLabel("Distractions and north star. North star: \(northStar).")
     }
 
     private func drawKeyWords(_ words: [(String, Character)], in rect: NSRect) {
