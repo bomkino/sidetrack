@@ -34,6 +34,7 @@ Sidetrack follows small, deliberate releases. The page should become quieter and
 
 - Builds one universal application containing native Apple-silicon and Intel slices.
 - Pins both slices to the promised macOS 13 deployment target and makes the build fail if either architecture or target disappears.
+- Keeps accessibility reading-order assembly simple enough for the older Swift compiler used by the public macOS 14 CI runner.
 - Keeps the event-driven runtime: no continuous redraw loop, no network calls, and no data write during an idle minute.
 - Preserves the existing local JSON format and application-support location; no migration is required.
 

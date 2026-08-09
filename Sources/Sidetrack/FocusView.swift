@@ -1076,13 +1076,23 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
         accessibilityElementCache = accessibilityElementCache.filter { usedKeys.contains($0.key) }
         let todayFirst = g.isVertical && data.display.panelOrder == .todayFirst
+        var readingOrder: [Any] = []
         if todayFirst {
-            accessibilityReadingOrder = [dateElement, counterView] + todayOrder
-                + Array(mainOrder.prefix(1)) + [timerView] + Array(mainOrder.dropFirst())
+            readingOrder.append(dateElement)
+            readingOrder.append(counterView)
+            readingOrder.append(contentsOf: todayOrder)
+            if let mainThought = mainOrder.first { readingOrder.append(mainThought) }
+            readingOrder.append(timerView)
+            readingOrder.append(contentsOf: mainOrder.dropFirst())
         } else {
-            accessibilityReadingOrder = Array(mainOrder.prefix(1)) + [timerView]
-                + Array(mainOrder.dropFirst()) + [dateElement] + todayOrder + [counterView]
+            if let mainThought = mainOrder.first { readingOrder.append(mainThought) }
+            readingOrder.append(timerView)
+            readingOrder.append(contentsOf: mainOrder.dropFirst())
+            readingOrder.append(dateElement)
+            readingOrder.append(contentsOf: todayOrder)
+            readingOrder.append(counterView)
         }
+        accessibilityReadingOrder = readingOrder
     }
 
     private func configureAccessibilityElement(
