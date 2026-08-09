@@ -184,31 +184,31 @@ private final class OverrunEffectView: NSView {
         guard !isHidden else { return }
 
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        if reduceMotion {
-            layer?.opacity = cue.showsPulse ? 0.86 : 1
-            underlineLayer.opacity = cue.showsUnderline ? 0.62 : 0
-            return
-        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.opacity = reduceMotion && cue.showsPulse ? 0.86 : 1
+        underlineLayer.opacity = cue.showsUnderline ? 0.46 : 0
+        CATransaction.commit()
+        guard !reduceMotion else { return }
 
-        layer?.opacity = 1
-        underlineLayer.opacity = cue.showsUnderline ? 1 : 0
+        // One breath when the cue tier changes. Repeating forever looked quiet,
+        // but kept AppKit's display cycle awake after the person had walked away.
+        // The question remains; the machine returns to true idle.
         if cue.showsPulse {
             let pulse = CABasicAnimation(keyPath: "opacity")
-            pulse.fromValue = 0.62
+            pulse.fromValue = 0.68
             pulse.toValue = 1.0
-            pulse.duration = 4.8
+            pulse.duration = 3.2
             pulse.autoreverses = true
-            pulse.repeatCount = .greatestFiniteMagnitude
             pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             layer?.add(pulse, forKey: "overrun-pulse")
         }
         if cue.showsUnderline {
             let underline = CABasicAnimation(keyPath: "opacity")
-            underline.fromValue = 0.24
-            underline.toValue = 0.72
-            underline.duration = 6.0
+            underline.fromValue = 0.16
+            underline.toValue = 0.58
+            underline.duration = 3.8
             underline.autoreverses = true
-            underline.repeatCount = .greatestFiniteMagnitude
             underline.beginTime = CACurrentMediaTime() + (cue.showsPulse ? 0.45 : 0)
             underline.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             underlineLayer.add(underline, forKey: "overrun-underline")

@@ -1,0 +1,24 @@
+name: macOS checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test core and idle-loop guard
+        run: Scripts/test.sh
+      - name: Build signed app archive
+        run: Scripts/build-app.sh
+      - name: Verify bundle
+        run: |
+          codesign --verify --deep --strict build/Sidetrack.app
+          plutil -lint build/Sidetrack.app/Contents/Info.plist

@@ -6,6 +6,8 @@ Sidetrack is a quiet second-screen focus display for macOS. One sentence holds t
 
 No account. No sync. No notifications. No streaks. No network calls. No Chromium.
 
+[Download the latest macOS app](https://github.com/bomkino/sidetrack/releases/latest) · macOS 13 or newer · Apple silicon and Intel
+
 ## Why
 
 Some brains do not need another productivity system. They need somewhere gentle to return to.
@@ -28,7 +30,7 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - Runs a manual `50 / 12 / 50 / 12 / 50 / 30` focus rhythm.
 - Fades secondary material during focus.
 - Uses stable, literal timer states—Ready, Focus underway, Focus paused, Short rest underway, Long rest underway—and always says what a click will do.
-- If a finished focus or rest waits for you, it whispers rather than notifying: a slow text pulse at 2× the phase length, a glyph-aware hairline at 3× that leaves room for descenders, both at 4×, then silence at 5× for a likely away-from-keyboard stretch.
+- If a finished focus or rest waits for you, it whispers rather than notifying: one slow text breath at 2× the phase length, a glyph-aware hairline at 3× that leaves room for descenders, both at 4×, then silence at 5× for a likely away-from-keyboard stretch.
 - Speaks the date and time through changing light: dawn, twilight, moonlight, and the hours between.
 - Displays its clock 15 minutes ahead by default; the offset is editable in Preferences and never changes pomodoro timing.
 - Counts distractions with a tiny daily `0000` clicker; hover reveals a soft decrement and the keyboard map, while right-click shows seven days.
@@ -93,11 +95,13 @@ Scripts/build-app.sh
 
 The unpacked app appears at `build/Sidetrack.app`; a clean signed install archive appears beside it as `build/Sidetrack.app.zip`. Build uses `swiftc` directly so no full Xcode install is required.
 
+Small, careful contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing Sidetrack’s interaction or visual language.
+
 ## Performance
 
 Sidetrack is native AppKit with custom event-driven drawing. No continuous render loop exists. Clock, vague timer, and pixel drift redraw once per minute; edits and window changes redraw on input. An idle minute does not touch the data file.
 
-The overrun whisper uses a single Core Animation layer only while a finished phase is waiting; it never becomes a second-by-second countdown.
+The overrun whisper performs one finite Core Animation breath when each late threshold arrives, then the display cycle sleeps again. It never becomes a second-by-second countdown or a permanent animation loop.
 
 Measured in full-screen on a 1920 × 1080 logical second display after the current polish pass:
 

@@ -10,12 +10,12 @@ Workspace:
 
 Read `README.md`, `PHILOSOPHY.md`, then `Docs/design-reference.png`.
 
-## Current truth — 8 August 2026
+## Current truth — 9 August 2026
 
 - Native macOS AppKit app; no SwiftUI, Electron, network, telemetry, or render loop.
 - Dark-only editorial interface based on user reference.
 - Main thought + literal timer state/click outcome stay together; poetic shifted date/time live on the right while secondary content fades.
-- Finished focus/rest choices carry a quiet overrun ladder: pulse at 2×, a glyph-aware hairline at 3× that skips descender ink, both at 4×, silence at 5×. The cue lives in Core timing metadata, persists across relaunch, and uses Core Animation only while active.
+- Finished focus/rest choices carry a quiet overrun ladder: one text breath at 2×, a glyph-aware hairline at 3× that skips descender ink, both at 4×, silence at 5×. Each threshold performs one finite Core Animation breath, then returns the display cycle to sleep; no reminder animation repeats forever.
 - Display clock defaults to +15 minutes and is independently configurable; pomodoro timing remains real.
 - Defaults: 50 focus, 12 break, repeated three times, then 30 long break.
 - Display preferences now choose the second screen relative to the Mac's main display (left, right, above, or remembered), portrait/landscape composition, Today-panel side, balanced/left/right edge alignment, and main-vs-Today order. The default is left + vertical, matching the current working setup. Preference changes preview immediately on the page.
@@ -36,8 +36,7 @@ Read `README.md`, `PHILOSOPHY.md`, then `Docs/design-reference.png`.
 - Built app: `build/Sidetrack.app`; use `build/Sidetrack.app.zip` for installation because the synced workspace can decorate unpacked bundle folders with unrelated Finder icon metadata after signing.
 - Installed app: `/Applications/Sidetrack.app`, version 1.4.0 (build 3), ad-hoc signature verified. Installed executable SHA-256: `6989f99a8db961c1285cfeefd0347ccc3891a3b2038546382a3aa49a8d11b23d`, matching `build/Sidetrack.app`. The prior 1.3.0 bundle is reversible at `/Applications/Sidetrack.app.previous-1.3.0`; the older 1.2.0 bundle remains at `/Applications/Sidetrack.app.previous`. The current launch lands full-screen on the left vertical display by default.
 - Public repository: `https://github.com/bomkino/sidetrack`; branch and release state must be checked live.
-- Current public main: commit `a451b5b` (`feat: whisper past forgotten timer phases`), pushed 8 August 2026.
-- Latest public release: `https://github.com/bomkino/sidetrack/releases/tag/v1.4.0`; `Sidetrack.app.zip` SHA-256 `379c7593c5859b204460720e72bd5dd4204ad249e48897ad7fed4c99ca950c2e`.
+- Current public main and release hashes: verify live before handoff.
 
 ## Finish next
 

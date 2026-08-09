@@ -21,3 +21,8 @@ swiftc -O \
 
 cd "$ROOT"
 "$BUILD/SidetrackChecks"
+
+if rg -q 'repeatCount\s*=\s*\.greatestFiniteMagnitude' "$ROOT/Sources/Sidetrack"; then
+  echo "Continuous Core Animation loops are not allowed in Sidetrack." >&2
+  exit 1
+fi
