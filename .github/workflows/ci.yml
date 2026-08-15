@@ -11,11 +11,15 @@ permissions:
 jobs:
   build:
     runs-on: macos-14
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Test core and idle-loop guard
         run: Scripts/test.sh
+      - name: Stress state, time language, and file recovery
+        run: Scripts/stress-test.sh
+      - name: Stress real AppKit layout, editing, and accessibility
+        run: Scripts/app-stress-test.sh
       - name: Build signed app archive
         run: Scripts/build-app.sh
       - name: Verify bundle

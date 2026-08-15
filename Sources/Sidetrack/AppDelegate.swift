@@ -1,7 +1,29 @@
 import AppKit
 import SidetrackCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+struct LaunchFullScreenRetryBudget {
+    static let maximumTransitionWaits = 12
+    private(set) var transitionWaits = 0
+
+    mutating func consumeTransitionWait(
+        isPending: inout Bool,
+        isTransitioning: Bool
+    ) -> Bool {
+        guard isPending, isTransitioning else { return false }
+        guard transitionWaits < Self.maximumTransitionWaits else {
+            isPending = false
+            return false
+        }
+        transitionWaits += 1
+        return true
+    }
+
+    mutating func resetTransitionWaits() { transitionWaits = 0 }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
+    private static let compactMinimumWindowSize = NSSize(width: 640, height: 900)
+
     private var window: NSWindow!
     private var focusView: FocusView!
     private var minuteTimer: Timer?
@@ -9,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var fullScreenTransitioning = false
     private var launchFullScreenAttempts = 0
     private var launchActivationAttempts = 0
+    private var launchFullScreenRetryBudget = LaunchFullScreenRetryBudget()
     private var pendingDisplayScreen: NSScreen?
     private var statusItem: NSStatusItem?
     private var presenceMode: PresenceMode = .both
@@ -25,10 +48,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             name: NSWorkspace.didWakeNotification,
             object: nil
         )
+        for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(
+                self,
+                selector: #selector(systemSteppedAway),
+                name: name,
+                object: nil
+            )
+        }
+        for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(
+                self,
+                selector: #selector(systemWoke),
+                name: name,
+                object: nil
+            )
+        }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        focusView.save()
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        focusView.prepareToTerminate() ? .terminateNow : .terminateCancel
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -40,14 +85,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) { rememberCurrentScreen() }
-    func windowWillEnterFullScreen(_ notification: Notification) { fullScreenTransitioning = true }
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        launchFullScreenRetryBudget.resetTransitionWaits()
+        fullScreenTransitioning = true
+    }
     func windowDidEnterFullScreen(_ notification: Notification) {
+        launchFullScreenRetryBudget.resetTransitionWaits()
         fullScreenTransitioning = false
         launchFullScreenPending = false
         rememberCurrentScreen()
     }
     func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        launchFullScreenRetryBudget.resetTransitionWaits()
         fullScreenTransitioning = false
+        prepareWindowForDisplay(window.screen ?? preferredScreen(for: focusView.displaySettings))
         requestLaunchFullScreen(after: 0.45)
     }
     func windowWillExitFullScreen(_ notification: Notification) {
@@ -55,9 +106,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         fullScreenTransitioning = true
     }
     func windowDidExitFullScreen(_ notification: Notification) {
+        launchFullScreenRetryBudget.resetTransitionWaits()
         fullScreenTransitioning = false
         guard let target = pendingDisplayScreen else { return }
         pendingDisplayScreen = nil
+        window.minSize = minimumWindowSize(for: target)
         window.setFrame(target.visibleFrame, display: true, animate: false)
         launchFullScreenAttempts = 0
         launchActivationAttempts = 0
@@ -86,10 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.backgroundColor = Palette.background
         window.contentView = focusView
         focusView.autoresizingMask = [.width, .height]
-        window.minSize = NSSize(width: 900, height: 600)
         window.collectionBehavior = [.fullScreenPrimary]
 
         let target = preferredScreen(for: focusView.displaySettings)
+        window.minSize = minimumWindowSize(for: target)
         if let target { window.setFrame(target.visibleFrame, display: true) }
         let backgroundQA = ProcessInfo.processInfo.environment["SIDETRACK_QA_BACKGROUND"] == "1"
         if backgroundQA {
@@ -191,6 +244,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let preferences = menu.addItem(withTitle: "Preferences…", action: #selector(showPreferences), keyEquivalent: "")
         preferences.target = self
         menu.addItem(.separator())
+        let stepAway = menu.addItem(withTitle: "Step Away", action: #selector(stepAway), keyEquivalent: "")
+        stepAway.target = self
+        let returnHere = menu.addItem(withTitle: "Return Here", action: #selector(returnHere), keyEquivalent: "")
+        returnHere.target = self
+        let closeDay = menu.addItem(withTitle: "Close the Day", action: #selector(closeDay), keyEquivalent: "")
+        closeDay.target = self
+        menu.addItem(.separator())
         let hide = menu.addItem(withTitle: "Hide Sidetrack", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         hide.keyEquivalentModifierMask = [.command]
         menu.addItem(withTitle: "Quit Sidetrack", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -205,6 +265,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return
             }
             if self.fullScreenTransitioning {
+                let transitionStillActive = self.fullScreenTransitioning
+                guard self.launchFullScreenRetryBudget.consumeTransitionWait(
+                    isPending: &self.launchFullScreenPending,
+                    isTransitioning: transitionStillActive
+                ) else {
+                    // AppKit owns transition truth. Stop our retries, but wait
+                    // for did-enter/did-fail/did-exit before clearing the flag.
+                    return
+                }
                 self.requestLaunchFullScreen(after: 0.45)
                 return
             }
@@ -222,6 +291,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return
             }
 
+            self.prepareWindowForDisplay(
+                self.window.screen ?? self.preferredScreen(for: self.focusView.displaySettings)
+            )
             self.launchFullScreenAttempts += 1
             NSApp.activate(ignoringOtherApps: true)
             self.window.makeKeyAndOrderFront(nil)
@@ -302,6 +374,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         taskMenu.addItem(withTitle: "Reset Timer", action: #selector(resetTimer), keyEquivalent: "")
         taskMenu.addItem(withTitle: "Begin Fresh Day…", action: #selector(startFreshDay), keyEquivalent: "")
 
+        let dayItem = NSMenuItem()
+        menu.addItem(dayItem)
+        let dayMenu = NSMenu(title: "Day")
+        dayItem.submenu = dayMenu
+        dayMenu.addItem(withTitle: "Step Away", action: #selector(stepAway), keyEquivalent: "")
+        dayMenu.addItem(withTitle: "Return Here", action: #selector(returnHere), keyEquivalent: "")
+        dayMenu.addItem(withTitle: "Return, Timer Paused", action: #selector(returnPaused), keyEquivalent: "")
+        dayMenu.addItem(.separator())
+        dayMenu.addItem(withTitle: "Close the Day", action: #selector(closeDay), keyEquivalent: "")
+        dayMenu.addItem(withTitle: "Begin Today", action: #selector(beginToday), keyEquivalent: "")
+
         let viewItem = NSMenuItem()
         menu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
@@ -371,7 +454,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func moveToPreferredDisplay(for settings: DisplaySettings) {
         guard let target = preferredScreen(for: settings), let current = window.screen else { return }
-        guard current != target else { return }
+        window.minSize = minimumWindowSize(for: target)
+        if current == target {
+            prepareWindowForDisplay(target)
+            return
+        }
         if window.styleMask.contains(.fullScreen) {
             pendingDisplayScreen = target
             launchFullScreenPending = false
@@ -379,6 +466,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else {
             window.setFrame(target.visibleFrame, display: true, animate: true)
             window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    /// Keep the window's own constraints inside the display it belongs to.
+    /// A minimum wider than a small portrait screen prevents AppKit from
+    /// entering full screen and leaves the window straddling both displays.
+    private func minimumWindowSize(for screen: NSScreen?) -> NSSize {
+        guard let screen else { return Self.compactMinimumWindowSize }
+        return NSSize(
+            width: min(Self.compactMinimumWindowSize.width, screen.visibleFrame.width),
+            height: min(Self.compactMinimumWindowSize.height, screen.visibleFrame.height)
+        )
+    }
+
+    private func prepareWindowForDisplay(_ screen: NSScreen?) {
+        guard let screen, !window.styleMask.contains(.fullScreen) else { return }
+        window.minSize = minimumWindowSize(for: screen)
+        let available = screen.visibleFrame
+        let frame = window.frame
+        let exceedsDisplay = frame.width > available.width || frame.height > available.height
+        let crossesDisplay = !NSContainsRect(available, frame)
+        if exceedsDisplay || crossesDisplay {
+            window.setFrame(available, display: true, animate: false)
         }
     }
 
@@ -400,7 +510,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         focusView.setPresenceMode(mode)
     }
 
+    @objc private func systemSteppedAway() { focusView.systemSteppedAway() }
     @objc private func systemWoke() { focusView.minuteChanged() }
+    @objc private func screenParametersChanged() {
+        guard let target = preferredScreen(for: focusView.displaySettings) else { return }
+        window.minSize = minimumWindowSize(for: target)
+        guard !fullScreenTransitioning else { return }
+        prepareWindowForDisplay(target)
+    }
     @objc private func showAbout() { NSApp.orderFrontStandardAboutPanel(nil) }
     @objc private func showPreferences() { focusView.showPreferences() }
     @objc private func addTask() { focusView.addTask() }
@@ -413,4 +530,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func showSavedDays() { focusView.showSavedDays() }
     @objc private func resetTimer() { focusView.resetTimer() }
     @objc private func startFreshDay() { focusView.startFreshDay() }
+    @objc private func stepAway() { focusView.stepAway() }
+    @objc private func returnHere() { focusView.returnToDay(resumeTimer: true) }
+    @objc private func returnPaused() { focusView.returnToDay(resumeTimer: false) }
+    @objc private func closeDay() { focusView.closeDay() }
+    @objc private func beginToday() { focusView.beginToday() }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard focusView != nil else { return false }
+        switch menuItem.action {
+        case #selector(stepAway):
+            return focusView.dayStatus == .open
+        case #selector(returnHere), #selector(returnPaused):
+            return focusView.dayStatus != .open
+        case #selector(closeDay):
+            return focusView.dayStatus != .closed
+        case #selector(beginToday):
+            return focusView.dayStatus != .open || !focusView.dayIsCurrent
+        default:
+            return true
+        }
+    }
 }

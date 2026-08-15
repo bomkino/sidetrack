@@ -72,8 +72,12 @@ final class CounterView: NSView {
         setAccessibilityHelp("Press to count one distraction. Additional actions can undo a count or rewrite the north star.")
         setAccessibilityValue(count)
         setAccessibilityCustomActions([
-            NSAccessibilityCustomAction(name: "Undo one distraction", target: self, selector: #selector(accessibilityUndo(_:))),
-            NSAccessibilityCustomAction(name: "Rewrite north star", target: self, selector: #selector(accessibilityRewriteNorthStar(_:)))
+            NSAccessibilityCustomAction(name: "Undo one distraction") { [weak self] in
+                self?.performAccessibilityUndo() ?? false
+            },
+            NSAccessibilityCustomAction(name: "Rewrite north star") { [weak self] in
+                self?.performAccessibilityRewriteNorthStar() ?? false
+            }
         ])
     }
 
@@ -122,7 +126,7 @@ final class CounterView: NSView {
         menu.addItem(.separator())
         for day in history?() ?? [] {
             let item = NSMenuItem(
-                title: "\(day.label)     \(String(format: "%04d", day.count))",
+                title: "\(day.label)     \(Self.formattedCount(day.count))",
                 action: nil,
                 keyEquivalent: ""
             )
@@ -136,17 +140,20 @@ final class CounterView: NSView {
         onEditOneThing?()
     }
 
-    @objc private func accessibilityUndo(_ action: NSAccessibilityCustomAction) -> Bool {
+    private func performAccessibilityUndo() -> Bool {
+        guard isAccessibilityEnabled() else { return false }
         onDecrement?()
         return true
     }
 
-    @objc private func accessibilityRewriteNorthStar(_ action: NSAccessibilityCustomAction) -> Bool {
+    private func performAccessibilityRewriteNorthStar() -> Bool {
+        guard isAccessibilityEnabled() else { return false }
         onEditOneThing?()
         return true
     }
 
     override func accessibilityPerformPress() -> Bool {
+        guard isAccessibilityEnabled() else { return false }
         onIncrement?()
         return true
     }
@@ -163,7 +170,7 @@ final class CounterView: NSView {
             ], in: NSRect(x: 105 * textScale, y: 23 * textScale, width: bounds.width - 105 * textScale, height: 22 * textScale))
         }
         drawText(
-            String(format: "%04d", count), in: countRect,
+            Self.formattedCount(count), in: countRect,
             font: Typography.roman(13 * textScale), color: Palette.quiet, tracking: 1.5 * textScale
         )
         if !hovered && !hidesOneThing {
@@ -197,6 +204,11 @@ final class CounterView: NSView {
     private func updateAccessibilityLabel() {
         let northStar = oneThing.isEmpty ? "empty" : oneThing
         setAccessibilityLabel("Distractions and north star. North star: \(northStar).")
+    }
+
+    static func formattedCount(_ count: Int) -> String {
+        let digits = String(max(0, count))
+        return String(repeating: "0", count: max(0, 4 - digits.count)) + digits
     }
 
     private func drawKeyWords(_ words: [(String, Character)], in rect: NSRect) {

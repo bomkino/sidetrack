@@ -20,6 +20,10 @@ Beside it sits a small north star: a few characters that can say `$10k`, `SLJ`, 
 
 Small windows do not become little dashboards. Sidetrack keeps the same hierarchy, lets the sentence breathe across more lines, and quietly removes secondary detail before it compresses the work into noise.
 
+A day needs edges, but the app does not get to invent them. `Step Away` means “hold this where I left it.” `Close the Day` saves the page and lets it rest. `Begin today` makes a clean page without erasing the north star or the traces already saved. Locking the Mac may safely mean away; an absent event stream, a quiet keyboard, or midnight does not mean a human has finished.
+
+That boundary matters for ADHD work. Interruption is normal. Returning should not require reconstructing the room, apologising to a timer, or dismissing a punishment. Sidetrack keeps the way back visible and asks one literal question. It does not watch app usage, build a behavioural profile, or import a timeline simply because those signals exist elsewhere on the computer. Ask, do not watch.
+
 Everything stays on the Mac. At day change, a plain Markdown memory is written locally; the page itself changes only when you choose a fresh start. The app asks for no identity and sends nothing away.
 
 This shape will not fit every ADHD or ADD brain. It was made for one kind of restless attention, then released freely in the hope that it may feel kind to another.

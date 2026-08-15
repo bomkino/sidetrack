@@ -1,5 +1,37 @@
 import Foundation
 
+private extension KeyedDecodingContainer {
+    /// A hand-edited readable file should lose only the malformed field, not
+    /// every valid sibling in the same settings or lifecycle object.
+    func decodeIfValid<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        do { return try decodeIfPresent(type, forKey: key) }
+        catch { return nil }
+    }
+}
+
+private struct LossyValue<Value: Decodable>: Decodable {
+    let value: Value?
+
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
+    }
+}
+
+private struct AnyCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        stringValue = String(intValue)
+        self.intValue = intValue
+    }
+}
+
 public struct Subtask: Codable, Equatable, Identifiable {
     public var id: UUID
     public var title: String
@@ -9,6 +41,24 @@ public struct Subtask: Codable, Equatable, Identifiable {
         self.id = id
         self.title = title
         self.isCompleted = isCompleted
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, title, isCompleted }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let title = container.decodeIfValid(String.self, forKey: .title) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .title,
+                in: container,
+                debugDescription: "A subthought needs readable text."
+            )
+        }
+        self.init(
+            id: container.decodeIfValid(UUID.self, forKey: .id) ?? UUID(),
+            title: title,
+            isCompleted: container.decodeIfValid(Bool.self, forKey: .isCompleted) ?? false
+        )
     }
 }
 
@@ -28,6 +78,27 @@ public struct TaskItem: Codable, Equatable, Identifiable {
         self.title = title
         self.isCompleted = isCompleted
         self.subtasks = subtasks
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, title, isCompleted, subtasks }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let title = container.decodeIfValid(String.self, forKey: .title) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .title,
+                in: container,
+                debugDescription: "A thought needs readable text."
+            )
+        }
+        let subtasks = container.decodeIfValid([LossyValue<Subtask>].self, forKey: .subtasks)?
+            .compactMap(\.value) ?? []
+        self.init(
+            id: container.decodeIfValid(UUID.self, forKey: .id) ?? UUID(),
+            title: title,
+            isCompleted: container.decodeIfValid(Bool.self, forKey: .isCompleted) ?? false,
+            subtasks: subtasks
+        )
     }
 }
 
@@ -63,12 +134,12 @@ public struct PomodoroSettings: Codable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            workMinutes: try container.decodeIfPresent(Int.self, forKey: .workMinutes) ?? 50,
-            breakMinutes: try container.decodeIfPresent(Int.self, forKey: .breakMinutes) ?? 12,
-            longBreakMinutes: try container.decodeIfPresent(Int.self, forKey: .longBreakMinutes) ?? 30,
-            cyclesPerSet: try container.decodeIfPresent(Int.self, forKey: .cyclesPerSet) ?? 3,
-            chimeEnabled: try container.decodeIfPresent(Bool.self, forKey: .chimeEnabled) ?? false,
-            clockOffsetMinutes: try container.decodeIfPresent(Int.self, forKey: .clockOffsetMinutes) ?? 15
+            workMinutes: container.decodeIfValid(Int.self, forKey: .workMinutes) ?? 50,
+            breakMinutes: container.decodeIfValid(Int.self, forKey: .breakMinutes) ?? 12,
+            longBreakMinutes: container.decodeIfValid(Int.self, forKey: .longBreakMinutes) ?? 30,
+            cyclesPerSet: container.decodeIfValid(Int.self, forKey: .cyclesPerSet) ?? 3,
+            chimeEnabled: container.decodeIfValid(Bool.self, forKey: .chimeEnabled) ?? false,
+            clockOffsetMinutes: container.decodeIfValid(Int.self, forKey: .clockOffsetMinutes) ?? 15
         )
     }
 
@@ -178,19 +249,19 @@ public struct DisplaySettings: Codable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let placement = try container.decodeIfPresent(DisplayPlacement.self, forKey: .placement) ?? .left
-        let orientation = try container.decodeIfPresent(DisplayOrientation.self, forKey: .orientation) ?? .vertical
-        let panelSide = try container.decodeIfPresent(PanelSide.self, forKey: .panelSide) ?? .right
-        let alignment = try container.decodeIfPresent(ContentAlignment.self, forKey: .alignment)
-        let panelOrder = try container.decodeIfPresent(PanelOrder.self, forKey: .panelOrder)
-        let presence = try container.decodeIfPresent(PresenceMode.self, forKey: .presence) ?? .both
-        let oldMainScale = try container.decodeIfPresent(Double.self, forKey: .mainScale)
-        let oldTimerScale = try container.decodeIfPresent(Double.self, forKey: .timerScale)
-        let oldTodayScale = try container.decodeIfPresent(Double.self, forKey: .todayScale)
-        let oldStepsScale = try container.decodeIfPresent(Double.self, forKey: .stepsScale)
-        let oldDateScale = try container.decodeIfPresent(Double.self, forKey: .dateScale)
-        let oldCounterScale = try container.decodeIfPresent(Double.self, forKey: .counterScale)
-        let legacyDefaults = alignment == nil || panelOrder == nil
+        let placement = container.decodeIfValid(DisplayPlacement.self, forKey: .placement) ?? .left
+        let orientation = container.decodeIfValid(DisplayOrientation.self, forKey: .orientation) ?? .vertical
+        let panelSide = container.decodeIfValid(PanelSide.self, forKey: .panelSide) ?? .right
+        let alignment = container.decodeIfValid(ContentAlignment.self, forKey: .alignment)
+        let panelOrder = container.decodeIfValid(PanelOrder.self, forKey: .panelOrder)
+        let presence = container.decodeIfValid(PresenceMode.self, forKey: .presence) ?? .both
+        let oldMainScale = container.decodeIfValid(Double.self, forKey: .mainScale)
+        let oldTimerScale = container.decodeIfValid(Double.self, forKey: .timerScale)
+        let oldTodayScale = container.decodeIfValid(Double.self, forKey: .todayScale)
+        let oldStepsScale = container.decodeIfValid(Double.self, forKey: .stepsScale)
+        let oldDateScale = container.decodeIfValid(Double.self, forKey: .dateScale)
+        let oldCounterScale = container.decodeIfValid(Double.self, forKey: .counterScale)
+        let legacyDefaults = !container.contains(.alignment) && !container.contains(.panelOrder)
 
         func migrated(_ value: Double?, fallback: Double) -> Double {
             guard let value else { return fallback }
@@ -207,7 +278,7 @@ public struct DisplaySettings: Codable, Equatable {
             alignment: alignment ?? .center,
             panelOrder: panelOrder ?? .todayFirst,
             presence: presence,
-            oledDimEnabled: try container.decodeIfPresent(Bool.self, forKey: .oledDimEnabled) ?? false,
+            oledDimEnabled: container.decodeIfValid(Bool.self, forKey: .oledDimEnabled) ?? false,
             mainScale: migrated(oldMainScale, fallback: 1.15),
             timerScale: migrated(oldTimerScale, fallback: 1.15),
             todayScale: migrated(oldTodayScale, fallback: 1.10),
@@ -282,13 +353,64 @@ public struct FocusTimer: Codable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            phase: try container.decodeIfPresent(TimerPhase.self, forKey: .phase) ?? .work,
-            status: try container.decodeIfPresent(TimerStatus.self, forKey: .status) ?? .idle,
-            remainingSeconds: try container.decodeIfPresent(Int.self, forKey: .remainingSeconds) ?? 50 * 60,
-            endsAt: try container.decodeIfPresent(Date.self, forKey: .endsAt),
-            completedCyclesInSet: try container.decodeIfPresent(Int.self, forKey: .completedCyclesInSet) ?? 0,
-            phaseDurationSeconds: try container.decodeIfPresent(Int.self, forKey: .phaseDurationSeconds),
-            phaseEndedAt: try container.decodeIfPresent(Date.self, forKey: .phaseEndedAt)
+            phase: container.decodeIfValid(TimerPhase.self, forKey: .phase) ?? .work,
+            status: container.decodeIfValid(TimerStatus.self, forKey: .status) ?? .idle,
+            remainingSeconds: container.decodeIfValid(Int.self, forKey: .remainingSeconds) ?? 50 * 60,
+            endsAt: container.decodeIfValid(Date.self, forKey: .endsAt),
+            completedCyclesInSet: container.decodeIfValid(Int.self, forKey: .completedCyclesInSet) ?? 0,
+            phaseDurationSeconds: container.decodeIfValid(Int.self, forKey: .phaseDurationSeconds),
+            phaseEndedAt: container.decodeIfValid(Date.self, forKey: .phaseEndedAt)
+        )
+    }
+}
+
+/// A boundary chosen by the person, not inferred from app activity.
+/// Sidetrack keeps only the present state; it does not build an attendance log.
+public enum DayStatus: String, Codable, Equatable {
+    case open
+    case away
+    case closed
+}
+
+public struct DaySession: Codable, Equatable {
+    public var status: DayStatus
+    /// True only when Sidetrack itself paused a running timer for an away state.
+    /// Returning still requires an explicit choice before that timer can resume.
+    public var resumeTimerOnReturn: Bool
+    /// Prevents a once-per-minute archive loop after a calendar boundary while
+    /// the person deliberately keeps the earlier working day open.
+    public var safetyArchivedDayKey: String?
+    /// Marks the archived Markdown as an exact snapshot of the visible page.
+    /// Page edits clear this without forgetting that the boundary was already
+    /// offered and acknowledged.
+    public var exactArchiveDayKey: String?
+
+    public init(
+        status: DayStatus = .open,
+        resumeTimerOnReturn: Bool = false,
+        safetyArchivedDayKey: String? = nil,
+        exactArchiveDayKey: String? = nil
+    ) {
+        self.status = status
+        self.resumeTimerOnReturn = resumeTimerOnReturn
+        self.safetyArchivedDayKey = safetyArchivedDayKey
+        self.exactArchiveDayKey = exactArchiveDayKey
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status, resumeTimerOnReturn, safetyArchivedDayKey, exactArchiveDayKey
+    }
+
+    /// Day lifecycle fields arrived after Sidetrack's first public files.
+    /// Missing fields are an older page, not a damaged page; preserve the
+    /// page and supply the quiet, open-day defaults.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            status: container.decodeIfValid(DayStatus.self, forKey: .status) ?? .open,
+            resumeTimerOnReturn: container.decodeIfValid(Bool.self, forKey: .resumeTimerOnReturn) ?? false,
+            safetyArchivedDayKey: container.decodeIfValid(String.self, forKey: .safetyArchivedDayKey),
+            exactArchiveDayKey: container.decodeIfValid(String.self, forKey: .exactArchiveDayKey)
         )
     }
 }
@@ -302,6 +424,7 @@ public struct AppData: Codable, Equatable {
     public var settings: PomodoroSettings
     public var display: DisplaySettings
     public var timer: FocusTimer
+    public var day: DaySession
     public var didSeedFirstRun: Bool
     public var distractionsByDay: [String: Int]
     public var activeDayKey: String
@@ -314,6 +437,7 @@ public struct AppData: Codable, Equatable {
         settings: PomodoroSettings = PomodoroSettings(),
         display: DisplaySettings = DisplaySettings(),
         timer: FocusTimer? = nil,
+        day: DaySession = DaySession(),
         didSeedFirstRun: Bool = true,
         distractionsByDay: [String: Int] = [:],
         activeDayKey: String = DistractionLog.key(),
@@ -324,7 +448,11 @@ public struct AppData: Codable, Equatable {
         self.oneThing = String(oneThing.prefix(20))
         self.settings = settings
         self.display = display
-        self.timer = timer ?? FocusTimer(remainingSeconds: settings.workMinutes * 60)
+        self.timer = timer ?? FocusTimer(
+            remainingSeconds: settings.workMinutes * 60,
+            phaseDurationSeconds: settings.workMinutes * 60
+        )
+        self.day = day
         self.didSeedFirstRun = didSeedFirstRun
         self.distractionsByDay = distractionsByDay
         self.activeDayKey = activeDayKey
@@ -336,21 +464,37 @@ public struct AppData: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case mainTask, today, oneThing, settings, display, timer, didSeedFirstRun, distractionsByDay, activeDayKey, copyIndex
+        case mainTask, today, oneThing, settings, display, timer, day, didSeedFirstRun, distractionsByDay, activeDayKey, copyIndex
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        mainTask = try container.decodeIfPresent(TaskItem.self, forKey: .mainTask)
-        today = try container.decodeIfPresent([TaskItem].self, forKey: .today) ?? []
-        oneThing = String((try container.decodeIfPresent(String.self, forKey: .oneThing) ?? "").prefix(20))
-        settings = try container.decodeIfPresent(PomodoroSettings.self, forKey: .settings) ?? PomodoroSettings()
-        display = try container.decodeIfPresent(DisplaySettings.self, forKey: .display) ?? DisplaySettings()
-        timer = try container.decodeIfPresent(FocusTimer.self, forKey: .timer)
+        mainTask = container.decodeIfValid(TaskItem.self, forKey: .mainTask)
+        today = container.decodeIfValid([LossyValue<TaskItem>].self, forKey: .today)?
+            .compactMap(\.value) ?? []
+        oneThing = String((container.decodeIfValid(String.self, forKey: .oneThing) ?? "").prefix(20))
+        // A typo in machine-owned state must not erase readable human words.
+        // Content fields above stay strict; non-content fields can safely fall
+        // back and are normalized again at the store boundary.
+        settings = (try? container.decode(PomodoroSettings.self, forKey: .settings)) ?? PomodoroSettings()
+        display = (try? container.decode(DisplaySettings.self, forKey: .display)) ?? DisplaySettings()
+        timer = (try? container.decode(FocusTimer.self, forKey: .timer))
             ?? FocusTimer(remainingSeconds: settings.workMinutes * 60)
-        didSeedFirstRun = try container.decodeIfPresent(Bool.self, forKey: .didSeedFirstRun) ?? false
-        distractionsByDay = try container.decodeIfPresent([String: Int].self, forKey: .distractionsByDay) ?? [:]
-        activeDayKey = try container.decodeIfPresent(String.self, forKey: .activeDayKey) ?? DistractionLog.key()
-        copyIndex = try container.decodeIfPresent(Int.self, forKey: .copyIndex) ?? 0
+        day = (try? container.decode(DaySession.self, forKey: .day)) ?? DaySession()
+        didSeedFirstRun = (try? container.decode(Bool.self, forKey: .didSeedFirstRun)) ?? false
+        if let history = try? container.nestedContainer(
+            keyedBy: AnyCodingKey.self,
+            forKey: .distractionsByDay
+        ) {
+            distractionsByDay = history.allKeys.reduce(into: [:]) { result, key in
+                if let count = history.decodeIfValid(Int.self, forKey: key) {
+                    result[key.stringValue] = count
+                }
+            }
+        } else {
+            distractionsByDay = [:]
+        }
+        activeDayKey = (try? container.decode(String.self, forKey: .activeDayKey)) ?? DistractionLog.key()
+        copyIndex = (try? container.decode(Int.self, forKey: .copyIndex)) ?? 0
     }
 }

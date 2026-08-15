@@ -16,7 +16,10 @@ public enum DistractionLog {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: key)
+        formatter.isLenient = false
+        guard let date = formatter.date(from: key),
+              formatter.string(from: date) == key else { return nil }
+        return date
     }
 
     public static func recentDays(
@@ -25,6 +28,7 @@ public enum DistractionLog {
         calendar: Calendar = .current,
         count: Int = 7
     ) -> [(label: String, count: Int)] {
+        guard count > 0 else { return [] }
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")

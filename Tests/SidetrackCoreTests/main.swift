@@ -92,6 +92,39 @@ let waitingRest = FocusTimer(
 )
 expect(TimerEngine.overrunCue(waitingRest, now: phaseEnd.addingTimeInterval(12 * 60)) == .pulse, "the same cue ladder works for short rest")
 
+var mismatchedWorkChoice = FocusTimer(
+    phase: .shortBreak,
+    status: .awaitingWorkChoice,
+    remainingSeconds: 0,
+    phaseDurationSeconds: 12 * 60,
+    phaseEndedAt: phaseEnd
+)
+TimerEngine.repairLoadedState(&mismatchedWorkChoice, settings: PomodoroSettings(), now: now)
+expect(mismatchedWorkChoice.phase == .work, "a work-finished question repairs a contradictory rest phase")
+expect(mismatchedWorkChoice.phaseDurationSeconds == 50 * 60, "a repaired work question uses the focus duration")
+
+var mismatchedBreakChoice = FocusTimer(
+    phase: .work,
+    status: .awaitingBreakChoice,
+    remainingSeconds: 0,
+    phaseDurationSeconds: 50 * 60,
+    phaseEndedAt: phaseEnd
+)
+TimerEngine.repairLoadedState(&mismatchedBreakChoice, settings: PomodoroSettings(), now: now)
+expect(mismatchedBreakChoice.phase == .shortBreak, "a rest-finished question repairs a contradictory work phase")
+expect(mismatchedBreakChoice.phaseDurationSeconds == 12 * 60, "a repaired rest question uses the rest duration")
+
+for impossibleDuration in [1, 59] {
+    var tinyDuration = FocusTimer(
+        phase: .work,
+        status: .paused,
+        remainingSeconds: 10 * 60,
+        phaseDurationSeconds: impossibleDuration
+    )
+    TimerEngine.repairLoadedState(&tinyDuration, settings: PomodoroSettings(), now: now)
+    expect(tinyDuration.phaseDurationSeconds == 50 * 60, "sub-minute phase duration \(impossibleDuration) is not a reachable timer phase")
+}
+
 var cycleTimer = FocusTimer(status: .awaitingWorkChoice, remainingSeconds: 0, completedCyclesInSet: 3)
 TimerEngine.takeBreak(&cycleTimer, settings: PomodoroSettings(cyclesPerSet: 4), now: now)
 expect(cycleTimer.phase == .longBreak, "long break follows configured cycle count")
@@ -101,6 +134,12 @@ var shortRestTimer = FocusTimer(status: .awaitingWorkChoice, remainingSeconds: 0
 TimerEngine.takeBreak(&shortRestTimer, settings: PomodoroSettings(), now: now)
 expect(shortRestTimer.phase == .shortBreak && shortRestTimer.status == .running, "choosing a short rest starts a distinct timer")
 expect(shortRestTimer.remainingSeconds == 12 * 60, "short rest receives the full configured countdown")
+
+var extendedFocus = FocusTimer(status: .awaitingWorkChoice, remainingSeconds: 0)
+TimerEngine.keepWorking(&extendedFocus, now: now)
+expect(extendedFocus.status == .running && extendedFocus.phase == .work, "keep working begins a distinct focus extension")
+expect(extendedFocus.remainingSeconds == 15 * 60, "focus extension leaves a useful quarter-hour before asking again")
+expect(extendedFocus.endsAt == now.addingTimeInterval(15 * 60), "focus extension has one calm, explicit finish")
 
 let defaults = PomodoroSettings()
 expect(defaults.workMinutes == 50, "default focus is 50 minutes")
@@ -128,6 +167,44 @@ expect(oldDisplay.presence == .both, "old display settings keep both macOS acces
 expect(oldDisplay.dateScale > 1 && oldDisplay.todayScale > 1, "old untouched display settings gain readable scale")
 let legacySettings = try! JSONDecoder().decode(PomodoroSettings.self, from: Data("{\"workMinutes\":25,\"breakMinutes\":5,\"longBreakMinutes\":30,\"cyclesPerSet\":4,\"chimeEnabled\":false}".utf8))
 expect(legacySettings.clockOffsetMinutes == 15, "older settings migrate to the preferred clock offset")
+
+let partialSettings = try! JSONDecoder().decode(
+    PomodoroSettings.self,
+    from: Data(#"{"workMinutes":75,"breakMinutes":15,"longBreakMinutes":40,"cyclesPerSet":5,"chimeEnabled":"sometimes","clockOffsetMinutes":20}"#.utf8)
+)
+expect(partialSettings.workMinutes == 75 && partialSettings.breakMinutes == 15 && partialSettings.longBreakMinutes == 40,
+       "one malformed settings field does not erase valid custom durations")
+expect(partialSettings.cyclesPerSet == 5 && partialSettings.clockOffsetMinutes == 20 && !partialSettings.chimeEnabled,
+       "settings repair defaults only the malformed sibling")
+
+let partialDisplay = try! JSONDecoder().decode(
+    DisplaySettings.self,
+    from: Data(#"{"placement":"right","orientation":"horizontal","panelSide":"left","alignment":"right","panelOrder":"mainFirst","presence":"menuBar","oledDimEnabled":true,"mainScale":1.2,"timerScale":1.1,"todayScale":1.0,"stepsScale":0.95,"dateScale":1.3,"counterScale":"large"}"#.utf8)
+)
+expect(partialDisplay.placement == .right && partialDisplay.orientation == .horizontal && partialDisplay.panelSide == .left,
+       "one malformed display field does not erase valid layout choices")
+expect(partialDisplay.alignment == .right && partialDisplay.panelOrder == .mainFirst && partialDisplay.presence == .menuBar,
+       "display repair preserves explicit alignment, order, and presence")
+expect(abs(partialDisplay.mainScale - 1.2) < 0.001 && abs(partialDisplay.dateScale - 1.3) < 0.001,
+       "display repair preserves valid sibling scales")
+
+let partialTimer = try! JSONDecoder().decode(
+    FocusTimer.self,
+    from: Data(#"{"phase":"shortBreak","status":"paused","remainingSeconds":719,"completedCyclesInSet":2,"phaseDurationSeconds":"twelve"}"#.utf8)
+)
+expect(partialTimer.phase == .shortBreak && partialTimer.status == .paused && partialTimer.remainingSeconds == 719,
+       "one malformed timer field does not reset a valid paused rest")
+expect(partialTimer.completedCyclesInSet == 2 && partialTimer.phaseDurationSeconds == nil,
+       "timer repair defaults only the malformed sibling")
+
+let partialDay = try! JSONDecoder().decode(
+    DaySession.self,
+    from: Data(#"{"status":"away","resumeTimerOnReturn":true,"safetyArchivedDayKey":17,"exactArchiveDayKey":"2026-07-17"}"#.utf8)
+)
+expect(partialDay.status == .away && partialDay.resumeTimerOnReturn,
+       "one malformed day marker does not reopen an explicit away page")
+expect(partialDay.safetyArchivedDayKey == nil && partialDay.exactArchiveDayKey == "2026-07-17",
+       "day repair defaults only the malformed marker")
 var resetTimer = FocusTimer(phase: .longBreak, status: .running, remainingSeconds: 10, endsAt: now, completedCyclesInSet: 2)
 TimerEngine.reset(&resetTimer, settings: defaults)
 expect(resetTimer.phase == .work && resetTimer.status == .idle, "timer reset returns to idle work")
@@ -138,6 +215,116 @@ expect(pausedTimer.remainingSeconds == 17 * 60, "preferences never reset a pause
 var idleTimer = FocusTimer(status: .idle, remainingSeconds: 50 * 60)
 TimerEngine.resetDurationIfIdle(&idleTimer, settings: PomodoroSettings(workMinutes: 60))
 expect(idleTimer.remainingSeconds == 60 * 60, "new duration applies while the timer is idle")
+
+expect(legacyAppData.day == DaySession(), "older day files migrate to an open, non-tracking day state")
+let singleMarkerDay = try! JSONDecoder().decode(
+    DaySession.self,
+    from: Data("{\"status\":\"away\",\"resumeTimerOnReturn\":false,\"safetyArchivedDayKey\":\"2026-07-17\"}".utf8)
+)
+expect(singleMarkerDay.exactArchiveDayKey == nil, "single-marker day files migrate without pretending their Markdown is exact")
+var awayDay = AppData(
+    mainTask: TaskItem(title: "Keep the honest edge"),
+    oneThing: "$10k",
+    timer: FocusTimer(status: .running, remainingSeconds: 40 * 60, endsAt: now.addingTimeInterval(40 * 60)),
+    distractionsByDay: ["2026-07-17": 3],
+    activeDayKey: "2026-07-17"
+)
+DayEngine.stepAway(&awayDay, now: now)
+expect(awayDay.day.status == .away, "stepping away becomes an explicit persisted state")
+expect(awayDay.timer.status == .paused && awayDay.timer.remainingSeconds == 40 * 60, "stepping away pauses a running timer without losing time")
+expect(awayDay.day.resumeTimerOnReturn, "Sidetrack remembers that it—not the person—paused the timer")
+
+var expiredAway = AppData(
+    timer: FocusTimer(
+        phase: .work,
+        status: .running,
+        remainingSeconds: 1,
+        endsAt: now.addingTimeInterval(-1),
+        phaseDurationSeconds: 50 * 60
+    )
+)
+DayEngine.stepAway(&expiredAway, now: now)
+expect(expiredAway.timer.status == .awaitingWorkChoice, "stepping away refreshes an elapsed deadline into its finished question")
+expect(!expiredAway.day.resumeTimerOnReturn, "an elapsed timer never acquires return-and-resume ownership")
+DayEngine.returnToDay(&expiredAway, resumeTimer: true, now: now)
+expect(expiredAway.timer.status == .awaitingWorkChoice, "returning cannot turn an elapsed zero timer into a fresh full phase")
+
+var returnedPaused = awayDay
+DayEngine.returnToDay(&returnedPaused, resumeTimer: false, now: now)
+expect(returnedPaused.day.status == .open && returnedPaused.timer.status == .paused, "returning paused never restarts time")
+expect(!returnedPaused.day.resumeTimerOnReturn, "a return choice clears the one-shot resume intention")
+
+var returnedRunning = awayDay
+DayEngine.returnToDay(&returnedRunning, resumeTimer: true, now: now)
+expect(returnedRunning.day.status == .open && returnedRunning.timer.status == .running, "an explicit return-and-resume choice restarts the held timer")
+expect(returnedRunning.timer.endsAt == now.addingTimeInterval(40 * 60), "return-and-resume rebuilds the deadline from preserved time")
+
+var closedDay = returnedRunning
+DayEngine.close(&closedDay, now: now)
+expect(closedDay.day.status == .closed && closedDay.timer.status == .paused, "closing a day pauses time and leaves a reversible closed page")
+expect(closedDay.day.safetyArchivedDayKey == nil, "closing today never pretends that a future calendar boundary was offered")
+expect(closedDay.day.exactArchiveDayKey == "2026-07-17", "a closed day records that its Markdown matches the visible page")
+
+var expiredClose = AppData(
+    timer: FocusTimer(
+        phase: .shortBreak,
+        status: .running,
+        remainingSeconds: 1,
+        endsAt: now.addingTimeInterval(-1),
+        phaseDurationSeconds: 12 * 60
+    )
+)
+DayEngine.close(&expiredClose, now: now)
+expect(expiredClose.timer.status == .awaitingBreakChoice, "closing refreshes an elapsed rest instead of preserving a resumable zero timer")
+
+let nextDay = calendar.date(from: DateComponents(year: 2026, month: 7, day: 18, hour: 9))!
+var reopenedBeforeBoundary = AppData(
+    mainTask: TaskItem(title: "A page that may continue"),
+    day: DaySession(status: .closed, exactArchiveDayKey: "2026-07-17"),
+    activeDayKey: "2026-07-17"
+)
+DayEngine.returnToDay(&reopenedBeforeBoundary, resumeTimer: false, now: date, calendar: calendar)
+var changedBeforeBoundary = reopenedBeforeBoundary
+changedBeforeBoundary.mainTask?.title = "A page changed before midnight"
+DayEngine.invalidateSafetyArchiveIfPageChanged(&changedBeforeBoundary, comparedTo: reopenedBeforeBoundary)
+expect(DayEngine.needsSafetyArchive(changedBeforeBoundary, now: nextDay, calendar: calendar), "close, reopen, edit, then midnight still receives its first boundary archive")
+
+var reopenedAfterBoundary = AppData(
+    day: DaySession(status: .closed, exactArchiveDayKey: "2026-07-17"),
+    activeDayKey: "2026-07-17"
+)
+DayEngine.returnToDay(&reopenedAfterBoundary, resumeTimer: false, now: nextDay, calendar: calendar)
+expect(reopenedAfterBoundary.day.safetyArchivedDayKey == "2026-07-17", "reopening a saved older page acknowledges its already-visible calendar choice")
+
+var boundaryDay = awayDay
+boundaryDay.day.safetyArchivedDayKey = nil
+expect(DayEngine.needsSafetyArchive(boundaryDay, now: nextDay, calendar: calendar), "an open earlier working day receives one safety archive")
+boundaryDay.day.safetyArchivedDayKey = boundaryDay.activeDayKey
+boundaryDay.day.exactArchiveDayKey = boundaryDay.activeDayKey
+expect(!DayEngine.needsSafetyArchive(boundaryDay, now: nextDay, calendar: calendar), "the calendar boundary does not create repeated archive copies")
+
+var editedAfterArchive = boundaryDay
+editedAfterArchive.day.status = .open
+let archivedSnapshot = editedAfterArchive
+editedAfterArchive.mainTask = TaskItem(title: "A truer sentence after midnight")
+DayEngine.invalidateSafetyArchiveIfPageChanged(&editedAfterArchive, comparedTo: archivedSnapshot)
+expect(editedAfterArchive.day.exactArchiveDayKey == nil, "editing a reopened page invalidates its older exact archive")
+expect(editedAfterArchive.day.safetyArchivedDayKey == editedAfterArchive.activeDayKey, "editing does not forget that the calendar boundary was already offered")
+expect(!DayEngine.needsSafetyArchive(editedAfterArchive, now: nextDay, calendar: calendar), "keeping and editing an older day never triggers another automatic archive prompt")
+
+var timerOnlyChange = boundaryDay
+let timerArchiveSnapshot = timerOnlyChange
+timerOnlyChange.timer.remainingSeconds -= 60
+DayEngine.invalidateSafetyArchiveIfPageChanged(&timerOnlyChange, comparedTo: timerArchiveSnapshot)
+expect(timerOnlyChange.day.exactArchiveDayKey == timerOnlyChange.activeDayKey, "timer-only changes keep an exact page archive current")
+
+var freshDay = awayDay
+freshDay.today = [TaskItem(title: "A later thought")]
+DayEngine.beginFreshDay(&freshDay, dayKey: "2026-07-18")
+expect(freshDay.day == DaySession() && freshDay.activeDayKey == "2026-07-18", "beginning today opens a clean explicit day")
+expect(freshDay.mainTask == nil && freshDay.today.isEmpty, "beginning today clears only the daily page")
+expect(freshDay.oneThing == "$10k" && freshDay.distractionsByDay["2026-07-17"] == 3, "a new day preserves the north star and earlier distraction history")
+expect(freshDay.timer.status == .idle && freshDay.timer.remainingSeconds == defaults.workMinutes * 60, "a new day begins with a fresh configured rhythm")
 
 let exportSample = AppData(
     mainTask: TaskItem(
@@ -229,6 +416,103 @@ do {
     let safeEmpty = damagedStore.load()
     expect(safeEmpty.mainTask == nil && safeEmpty.today.isEmpty, "unrecoverable data never becomes sample tasks")
     expect(FileManager.default.fileExists(atPath: damagedStore.unreadableURL.path), "unreadable source data is preserved")
+
+    let awayRunningStore = DataStore(fileURL: testDirectory.appendingPathComponent("away-running.json"))
+    let awayRunning = AppData(
+        mainTask: TaskItem(title: "Keep this held while away"),
+        timer: FocusTimer(
+            phase: .work,
+            status: .running,
+            remainingSeconds: 10 * 60,
+            endsAt: Date().addingTimeInterval(10 * 60),
+            phaseDurationSeconds: 50 * 60
+        ),
+        day: DaySession(status: .away, resumeTimerOnReturn: true),
+        activeDayKey: "2026-07-17"
+    )
+    try awayRunningStore.save(awayRunning)
+    let repairedAway = awayRunningStore.load()
+    expect(repairedAway.day.status == .away && repairedAway.timer.status == .paused,
+           "a readable away page can never keep advancing its timer")
+    expect(repairedAway.day.resumeTimerOnReturn,
+           "repair preserves explicit return ownership after safely pausing an away timer")
+
+    for (index, deadlineOffset) in [-6 * 60 * 60, 6 * 60 * 60].enumerated() {
+        let staleAwayStore = DataStore(
+            fileURL: testDirectory.appendingPathComponent("away-running-stale-\(index).json")
+        )
+        let staleAway = AppData(
+            mainTask: TaskItem(title: "Keep exactly ten minutes"),
+            timer: FocusTimer(
+                phase: .work,
+                status: .running,
+                remainingSeconds: 10 * 60,
+                endsAt: Date().addingTimeInterval(TimeInterval(deadlineOffset)),
+                phaseDurationSeconds: 50 * 60
+            ),
+            day: DaySession(status: .away, resumeTimerOnReturn: true),
+            activeDayKey: "2026-07-17"
+        )
+        try staleAwayStore.save(staleAway)
+        let heldAway = staleAwayStore.load()
+        expect(heldAway.timer.status == .paused && heldAway.timer.remainingSeconds == 10 * 60,
+               "away load consumed held seconds from a \(deadlineOffset < 0 ? "past" : "future") deadline")
+        expect(heldAway.timer.endsAt == nil && heldAway.day.resumeTimerOnReturn,
+               "away load lost explicit resume ownership or retained a wall-clock deadline")
+
+        let staleClosedStore = DataStore(
+            fileURL: testDirectory.appendingPathComponent("closed-running-stale-\(index).json")
+        )
+        var staleClosed = staleAway
+        staleClosed.day = DaySession(status: .closed, resumeTimerOnReturn: true)
+        try staleClosedStore.save(staleClosed)
+        let heldClosed = staleClosedStore.load()
+        expect(heldClosed.timer.status == .paused && heldClosed.timer.remainingSeconds == 10 * 60,
+               "closed load consumed held seconds from a \(deadlineOffset < 0 ? "past" : "future") deadline")
+        expect(heldClosed.timer.endsAt == nil && !heldClosed.day.resumeTimerOnReturn,
+               "closed load retained a deadline or return ownership")
+    }
+
+    let salvageStore = DataStore(fileURL: testDirectory.appendingPathComponent("salvage.json"))
+    let duplicateTaskID = UUID().uuidString
+    let duplicateStepID = UUID().uuidString
+    let salvageJSON = """
+    {
+      "mainTask": {
+        "id": "not-a-uuid",
+        "title": "main words survive",
+        "isCompleted": "not-a-bool",
+        "subtasks": [
+          {"id":"\(duplicateStepID)","title":"first step survives","isCompleted":false},
+          {"id":"\(duplicateStepID)","title":"second step survives","isCompleted":"not-a-bool"},
+          {"id":"bad","title":17,"isCompleted":false}
+        ]
+      },
+      "today": [
+        {"id":"\(duplicateTaskID)","title":"first later thought","isCompleted":false,"subtasks":[]},
+        {"id":"broken","title":17,"isCompleted":false,"subtasks":[]},
+        {"id":"\(duplicateTaskID)","title":"second later thought","isCompleted":"not-a-bool","subtasks":[]}
+      ],
+      "distractionsByDay": {"2026-07-17":7,"broken":"many"},
+      "activeDayKey": "2026-07-17"
+    }
+    """
+    try Data(salvageJSON.utf8).write(to: salvageStore.fileURL, options: .atomic)
+    let salvagedItems = salvageStore.load()
+    expect(salvagedItems.mainTask?.title == "main words survive" && salvagedItems.mainTask?.isCompleted == false,
+           "a malformed main ID or completion flag erased readable words")
+    expect(salvagedItems.mainTask?.subtasks.map(\.title) == ["first step survives", "second step survives"],
+           "one irrecoverable subthought erased readable siblings")
+    expect(salvagedItems.today.map(\.title) == ["first later thought", "second later thought"],
+           "one irrecoverable Today item erased readable neighbours")
+    expect(salvagedItems.distractionsByDay["2026-07-17"] == 7,
+           "one malformed history entry erased valid distraction history")
+    let taskIDs = [salvagedItems.mainTask?.id].compactMap { $0 } + salvagedItems.today.map(\.id)
+    let stepIDs = salvagedItems.mainTask?.subtasks.map(\.id) ?? []
+    expect(Set(taskIDs).count == taskIDs.count && Set(stepIDs).count == stepIDs.count,
+           "duplicate persisted IDs still alias distinct thoughts or steps")
+    expect(!FileManager.default.fileExists(atPath: salvageStore.backupURL.path),
+           "field-level salvage unnecessarily fell back to a previous page")
     try FileManager.default.removeItem(at: testDirectory)
 } catch {
     FileHandle.standardError.write(Data("FAIL: store check: \(error)\n".utf8))

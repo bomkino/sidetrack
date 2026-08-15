@@ -46,7 +46,8 @@ public enum CopyBank {
     public static func oneThingPrompt(index: Int) -> String { pick(oneThing, index) }
 
     public static func next(_ index: Int) -> Int {
-        (index + 1) % main.count
+        let normalized = ((index % main.count) + main.count) % main.count
+        return (normalized + 1) % main.count
     }
 
     private static func pick(_ values: [String], _ index: Int) -> String {

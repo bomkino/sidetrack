@@ -222,6 +222,8 @@ final class TimerView: NSView {
 
     var timer = FocusTimer()
     var settings = PomodoroSettings()
+    var day = DaySession()
+    var isCurrentDay = true
     var textScale: CGFloat = 1
     var textAlignment: NSTextAlignment = .left
     var overrunCue: TimerOverrunCue = .none
@@ -229,9 +231,18 @@ final class TimerView: NSView {
     var onTakeBreak: (() -> Void)?
     var onKeepWorking: (() -> Void)?
     var onStartAgain: (() -> Void)?
+    var onReturnToDay: ((Bool) -> Void)?
+    var onCloseDay: (() -> Void)?
+    var onBeginToday: (() -> Void)?
 
     private var firstOption = NSRect.zero
     private var secondOption = NSRect.zero
+    private enum ChoiceAction {
+        case takeBreak, keepWorking, startAgain, wait
+        case returnAndResume, returnPaused, closeDay, beginToday, keepDay, reopen
+    }
+    private var firstChoiceAction: ChoiceAction?
+    private var secondChoiceAction: ChoiceAction?
     private let overrunEffectView = OverrunEffectView(frame: .zero)
     private let firstChoiceAccessibility = QuietAccessibilityElement()
     private let secondChoiceAccessibility = QuietAccessibilityElement()
@@ -271,12 +282,16 @@ final class TimerView: NSView {
     func update(
         timer: FocusTimer,
         settings: PomodoroSettings,
+        day: DaySession = DaySession(),
+        isCurrentDay: Bool = true,
         scale: CGFloat = 1,
         gentle: Bool = false,
         overrun: TimerOverrunCue = .none
     ) {
         self.timer = timer
         self.settings = settings
+        self.day = day
+        self.isCurrentDay = isCurrentDay
         self.textScale = scale
         self.overrunCue = overrun
         if gentle {
@@ -303,8 +318,12 @@ final class TimerView: NSView {
         secondOption = .zero
 
         let remaining = TimerEngine.secondsRemaining(timer)
-        let effectIsVisible = overrunCue.isActive && choiceLine() != nil
         updateChoiceRects()
+        if day.status != .open {
+            drawDayState(remaining: remaining)
+            return
+        }
+        let effectIsVisible = overrunCue.isActive && choiceLine() != nil
         switch timer.status {
         case .awaitingWorkChoice:
             let isLong = timer.completedCyclesInSet + 1 >= settings.cyclesPerSet
@@ -336,15 +355,17 @@ final class TimerView: NSView {
     }
 
     private func updateChoiceRects() {
-        let texts: (String, String)
-        switch timer.status {
-        case .awaitingWorkChoice: texts = ("Begin rest", "·  Keep working")
-        case .awaitingBreakChoice: texts = ("Start focus", "·  Not yet")
-        default:
+        let presentation = choicePresentation()
+        guard let presentation else {
             firstOption = .zero
             secondOption = .zero
+            firstChoiceAction = nil
+            secondChoiceAction = nil
             return
         }
+        let texts = (presentation.first.title, presentation.second.title)
+        firstChoiceAction = presentation.first.action
+        secondChoiceAction = presentation.second.action
 
         let font = Typography.roman(13 * textScale)
         let firstWidth = ceil((texts.0 as NSString).size(withAttributes: [.font: font]).width) + 5 * textScale
@@ -364,26 +385,122 @@ final class TimerView: NSView {
         updateChoiceAccessibility(texts: texts)
     }
 
+    private typealias Choice = (title: String, key: Character, action: ChoiceAction)
+
+    private func choicePresentation() -> (line: String, first: Choice, second: Choice)? {
+        if day.status == .away {
+            if !isCurrentDay {
+                return (
+                    "Waiting where you left it  ·  begin today?",
+                    ("Begin today", "B", .beginToday),
+                    ("·  Keep this day", "K", .keepDay)
+                )
+            }
+            if day.resumeTimerOnReturn {
+                return (
+                    awayLine(remaining: TimerEngine.secondsRemaining(timer)),
+                    ("Back & resume", "B", .returnAndResume),
+                    ("·  Keep paused", "K", .returnPaused)
+                )
+            }
+            return (
+                awayLine(remaining: TimerEngine.secondsRemaining(timer)),
+                ("Back here", "B", .returnPaused),
+                ("·  Close day", "C", .closeDay)
+            )
+        }
+
+        if day.status == .closed {
+            if !isCurrentDay {
+                return (
+                    "The last day is saved  ·  begin today?",
+                    ("Begin today", "B", .beginToday),
+                    ("·  Reopen", "R", .reopen)
+                )
+            }
+            return (
+                "Day closed  ·  nothing else is asking",
+                ("Reopen", "R", .reopen),
+                ("·  Begin fresh", "B", .beginToday)
+            )
+        }
+
+        switch timer.status {
+        case .awaitingWorkChoice:
+            return (choiceLine() ?? "", ("Begin rest", "B", .takeBreak), ("·  Keep working", "K", .keepWorking))
+        case .awaitingBreakChoice:
+            return (choiceLine() ?? "", ("Start focus", "S", .startAgain), ("·  Not yet", "N", .wait))
+        default:
+            return nil
+        }
+    }
+
+    private func awayLine(remaining: Int) -> String {
+        switch timer.status {
+        case .paused where timer.phase == .work:
+            return "You stepped away  ·  focus paused with \(TimeLanguage.timer(seconds: remaining))"
+        case .paused where timer.phase == .shortBreak:
+            return "You stepped away  ·  short rest paused with \(TimeLanguage.timer(seconds: remaining))"
+        case .paused:
+            return "You stepped away  ·  long rest paused with \(TimeLanguage.timer(seconds: remaining))"
+        case .awaitingWorkChoice:
+            return "You stepped away  ·  the rest question is waiting"
+        case .awaitingBreakChoice:
+            return "You stepped away  ·  the return question is waiting"
+        default:
+            return "You stepped away  ·  your page is unchanged"
+        }
+    }
+
+    private func drawDayState(remaining: Int) {
+        guard let presentation = choicePresentation() else { return }
+        drawText(presentation.line,
+                 in: NSRect(x: 0, y: 0, width: bounds.width, height: 27 * textScale),
+                 font: Typography.italic(17 * textScale), color: Palette.paper,
+                 alignment: textAlignment)
+        drawOption(presentation.first.title, key: presentation.first.key, in: firstOption)
+        drawOption(presentation.second.title, key: presentation.second.key, in: secondOption)
+    }
+
     private func updateChoiceAccessibility(texts: (String, String)) {
         firstChoiceAccessibility.setAccessibilityFrameInParentSpace(firstOption.insetBy(dx: -5, dy: -8))
         secondChoiceAccessibility.setAccessibilityFrameInParentSpace(secondOption.insetBy(dx: -5, dy: -8))
         firstChoiceAccessibility.setAccessibilityLabel(texts.0.replacingOccurrences(of: "·  ", with: ""))
         secondChoiceAccessibility.setAccessibilityLabel(texts.1.replacingOccurrences(of: "·  ", with: ""))
 
-        switch timer.status {
-        case .awaitingWorkChoice:
-            firstChoiceAccessibility.setAccessibilityHelp("Begin the suggested rest.")
-            secondChoiceAccessibility.setAccessibilityHelp("Continue with five more minutes of focus.")
-            firstChoiceAccessibility.onPress = { [weak self] in self?.onTakeBreak?(); return self != nil }
-            secondChoiceAccessibility.onPress = { [weak self] in self?.onKeepWorking?(); return self != nil }
-        case .awaitingBreakChoice:
-            firstChoiceAccessibility.setAccessibilityHelp("Begin a new focus session.")
-            secondChoiceAccessibility.setAccessibilityHelp("Leave this question waiting.")
-            firstChoiceAccessibility.onPress = { [weak self] in self?.onStartAgain?(); return self != nil }
-            secondChoiceAccessibility.onPress = { [weak self] in return self != nil }
-        default:
-            firstChoiceAccessibility.onPress = nil
-            secondChoiceAccessibility.onPress = nil
+        firstChoiceAccessibility.setAccessibilityHelp(help(for: firstChoiceAction))
+        secondChoiceAccessibility.setAccessibilityHelp(help(for: secondChoiceAction))
+        firstChoiceAccessibility.onPress = { [weak self] in self?.perform(self?.firstChoiceAction); return self != nil }
+        secondChoiceAccessibility.onPress = { [weak self] in self?.perform(self?.secondChoiceAction); return self != nil }
+    }
+
+    private func help(for action: ChoiceAction?) -> String? {
+        switch action {
+        case .takeBreak: return "Begin the suggested rest."
+        case .keepWorking: return "Continue with fifteen more minutes of focus."
+        case .startAgain: return "Begin a new focus session."
+        case .wait: return "Leave this question waiting."
+        case .returnAndResume: return "Return to the page and resume the timer that Sidetrack paused."
+        case .returnPaused: return "Return to the page without starting its timer."
+        case .closeDay: return "Save this day as Markdown and close it."
+        case .beginToday: return "Save the earlier page and begin a clean day."
+        case .keepDay: return "Keep the earlier working day open and return with its timer paused."
+        case .reopen: return "Reopen the saved page without starting its timer."
+        case nil: return nil
+        }
+    }
+
+    private func perform(_ action: ChoiceAction?) {
+        switch action {
+        case .takeBreak: onTakeBreak?()
+        case .keepWorking: onKeepWorking?()
+        case .startAgain: onStartAgain?()
+        case .wait: break
+        case .returnAndResume: onReturnToDay?(true)
+        case .returnPaused, .keepDay, .reopen: onReturnToDay?(false)
+        case .closeDay: onCloseDay?()
+        case .beginToday: onBeginToday?()
+        case nil: break
         }
     }
 
@@ -462,6 +579,12 @@ final class TimerView: NSView {
 
     private func updateAccessibility() {
         let remaining = TimerEngine.secondsRemaining(timer)
+        if day.status != .open, let presentation = choicePresentation() {
+            setAccessibilityRole(.group)
+            setAccessibilityLabel(presentation.line)
+            setAccessibilityHelp("Choose \(presentation.first.title) or \(presentation.second.title.replacingOccurrences(of: "·  ", with: "")).")
+            return
+        }
         switch timer.status {
         case .awaitingWorkChoice:
             setAccessibilityRole(.group)
@@ -479,6 +602,7 @@ final class TimerView: NSView {
     }
 
     override func accessibilityChildren() -> [Any]? {
+        if day.status != .open { return [firstChoiceAccessibility, secondChoiceAccessibility] }
         switch timer.status {
         case .awaitingWorkChoice, .awaitingBreakChoice:
             return [firstChoiceAccessibility, secondChoiceAccessibility]
@@ -497,6 +621,7 @@ final class TimerView: NSView {
     }
 
     override func accessibilityPerformPress() -> Bool {
+        if day.status != .open { return false }
         switch timer.status {
         case .awaitingWorkChoice, .awaitingBreakChoice: return false
         default:
@@ -507,6 +632,11 @@ final class TimerView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if day.status != .open {
+            if firstOption.insetBy(dx: -5, dy: -8).contains(point) { perform(firstChoiceAction) }
+            else if secondOption.insetBy(dx: -5, dy: -8).contains(point) { perform(secondChoiceAction) }
+            return
+        }
         switch timer.status {
         case .awaitingWorkChoice:
             if firstOption.insetBy(dx: -5, dy: -8).contains(point) { onTakeBreak?() }

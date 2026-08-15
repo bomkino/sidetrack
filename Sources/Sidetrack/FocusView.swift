@@ -47,6 +47,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private var subtaskRects: [(UUID, NSRect, NSRect)] = []
     private var sideRects: [(UUID, NSRect, NSRect, NSRect)] = []
     private var sideSubtaskRects: [(UUID, UUID, NSRect, NSRect)] = []
+    private var mainOverflowRect = NSRect.zero
+    private var todayOverflowRect = NSRect.zero
     private var accessibilityElementCache: [String: QuietAccessibilityElement] = [:]
     private var accessibilityReadingOrder: [Any] = []
 
@@ -55,19 +57,44 @@ final class FocusView: NSView, NSTextFieldDelegate {
     override var acceptsFirstResponder: Bool { true }
 
     private var oledDimActive: Bool {
-        data.display.oledDimEnabled && data.timer.status == .running
+        data.day.status == .open && data.display.oledDimEnabled && data.timer.status == .running
     }
 
     private var secondaryAlpha: CGFloat {
+        if data.day.status != .open { return 0.24 }
         if oledDimActive { return 0.26 }
         return data.timer.status == .running ? 0.40 : 1
+    }
+
+    private var effectiveMainStepsScale: CGFloat {
+        let requested = CGFloat(data.display.stepsScale)
+        guard data.display.orientation == .vertical,
+              data.display.panelOrder == .todayFirst else { return requested }
+
+        // Preserve the authored 720 × 1280 page. In a genuinely short window,
+        // tighten only the supporting steps so the focus sentence keeps its
+        // voice and the last step does not disappear below the glass.
+        let heightFit = min(1, max(0.76, bounds.height / 1_120))
+        return requested * heightFit
     }
 
     init(store: DataStore) {
         self.store = store
         self.data = store.load()
         super.init(frame: .zero)
-        _ = rollOverDayIfNeeded()
+        TimerEngine.ensurePhaseMetadata(&data.timer, settings: data.settings)
+        _ = TimerEngine.refresh(&data.timer)
+        let boundaryArchivePending = data.day.status == .open
+            && DayEngine.needsSafetyArchive(data)
+        if boundaryArchivePending {
+            let archivedAcrossBoundary = safetyArchiveIfNeeded()
+            if archivedAcrossBoundary {
+                DayEngine.stepAway(&data)
+                save()
+            }
+        } else {
+            _ = safetyArchiveIfNeeded()
+        }
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         setAccessibilityElement(true)
@@ -76,9 +103,18 @@ final class FocusView: NSView, NSTextFieldDelegate {
         addSubview(timerView)
         addSubview(counterView)
         configureTimerActions()
-        counterView.onIncrement = { [weak self] in self?.incrementDistraction() }
-        counterView.onDecrement = { [weak self] in self?.decrementDistraction() }
-        counterView.onEditOneThing = { [weak self] in self?.editOneThing() }
+        counterView.onIncrement = { [weak self] in
+            guard self?.data.day.status == .open else { return }
+            self?.incrementDistraction()
+        }
+        counterView.onDecrement = { [weak self] in
+            guard self?.data.day.status == .open else { return }
+            self?.decrementDistraction()
+        }
+        counterView.onEditOneThing = { [weak self] in
+            guard self?.data.day.status == .open else { return }
+            self?.editOneThing()
+        }
         counterView.history = { [weak self] in
             guard let self else { return [] }
             return DistractionLog.recentDays(from: self.data.distractionsByDay).map { ($0.label, $0.count) }
@@ -141,58 +177,95 @@ final class FocusView: NSView, NSTextFieldDelegate {
         return children.isEmpty ? [timerView, counterView] : children
     }
 
-    func minuteChanged() {
-        _ = rollOverDayIfNeeded()
-        let event = refreshTimer()
+    func minuteChanged(now: Date = Date(), calendar: Calendar = .current) {
+        let boundaryArchivePending = data.day.status == .open
+            && DayEngine.needsSafetyArchive(data, now: now, calendar: calendar)
+        if boundaryArchivePending, !commitEditor() {
+            // A storage failure must hold the page and its editor in place,
+            // but time still passes. Do not leave an elapsed phase pretending
+            // to run merely because its midnight archive could not be written.
+            let event = refreshTimer(now: now)
+            needsDisplay = true
+            if event != .none { _ = save() }
+            return
+        }
+        let archivedAcrossBoundary = safetyArchiveIfNeeded(now: now, calendar: calendar)
+        if archivedAcrossBoundary,
+           !DayEngine.isCurrentDay(data, now: now, calendar: calendar),
+           data.day.status == .open {
+            // The archive is safely on disk. Hold the old page where it is
+            // and ask what comes next; midnight never clears or closes it.
+            window?.undoManager?.removeAllActions()
+            DayEngine.stepAway(&data, now: now)
+            save()
+        }
+        let event = refreshTimer(now: now)
         needsDisplay = true
         if event != .none { save() }
     }
 
-    func save() {
+    @discardableResult
+    func save() -> Bool {
+        persist(data)
+    }
+
+    @discardableResult
+    private func persist(_ value: AppData) -> Bool {
         do {
-            try store.save(data)
+            try store.save(value)
             hasShownSaveFailure = false
+            return true
         } catch {
-            guard !hasShownSaveFailure, let window, window.attachedSheet == nil else { return }
-            hasShownSaveFailure = true
-            showWriteFailure(
-                title: "This change is not saved yet.",
-                explanation: "Nothing on the page was cleared. Check that Sidetrack can write to its local folder, then try once more.",
-                error: error
-            )
+            if !hasShownSaveFailure, let window, window.attachedSheet == nil {
+                hasShownSaveFailure = true
+                showWriteFailure(
+                    title: "This change is not saved yet.",
+                    explanation: "Nothing on the page was cleared. Check that Sidetrack can write to its local folder, then try once more.",
+                    error: error
+                )
+            }
+            return false
         }
     }
 
     func addTask() {
+        guard data.day.status == .open else { return }
         beginEditing(.newTask, text: "")
     }
 
     func addSubtask() {
-        guard data.mainTask != nil else { return }
+        guard data.day.status == .open, data.mainTask != nil else { return }
         beginEditing(.newSubtask, text: "")
     }
 
     func editMain() {
+        guard data.day.status == .open else { return }
         guard let task = data.mainTask else { beginEditing(.main, text: ""); return }
         beginEditing(.main, text: task.title)
     }
 
     func editOneThing() {
+        guard data.day.status == .open else { return }
         beginEditing(.oneThing, text: data.oneThing)
     }
 
     func toggleTimer() {
+        guard data.day.status == .open else { return }
         TimerEngine.toggle(&data.timer, settings: data.settings)
         changed()
     }
 
     func promoteNext() {
-        guard let index = data.today.firstIndex(where: { !$0.isCompleted }) else { return }
+        guard data.day.status == .open,
+              commitActiveEditorIfNeeded(),
+              let index = data.today.firstIndex(where: { !$0.isCompleted }) else { return }
         promote(at: index)
     }
 
     func completeMain() {
-        guard var main = data.mainTask else { return }
+        guard data.day.status == .open,
+              commitActiveEditorIfNeeded(),
+              var main = data.mainTask else { return }
         var next = data
         main.isCompleted = true
         next.today.insert(main, at: 0)
@@ -201,36 +274,48 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     func incrementDistraction() {
-        let key = DistractionLog.key()
-        data.distractionsByDay[key, default: 0] += 1
+        guard data.day.status == .open else { return }
+        let previous = data
+        let key = data.activeDayKey
+        let current = data.distractionsByDay[key, default: 0]
+        guard current < Int.max else { return }
+        data.distractionsByDay[key] = current + 1
+        DayEngine.invalidateSafetyArchiveIfPageChanged(&data, comparedTo: previous)
         changed()
     }
 
     func decrementDistraction() {
-        let key = DistractionLog.key()
+        guard data.day.status == .open else { return }
+        let previous = data
+        let key = data.activeDayKey
         let current = data.distractionsByDay[key, default: 0]
         guard current > 0 else { return }
         data.distractionsByDay[key] = current - 1
+        DayEngine.invalidateSafetyArchiveIfPageChanged(&data, comparedTo: previous)
         changed()
     }
 
     func completeNextSubtask() {
-        guard let id = data.mainTask?.subtasks.first(where: { !$0.isCompleted })?.id else { return }
+        guard data.day.status == .open,
+              commitActiveEditorIfNeeded(),
+              let id = data.mainTask?.subtasks.first(where: { !$0.isCompleted })?.id else { return }
         toggleSubtask(id)
     }
 
     func exportDay() {
         guard let window else { return }
+        guard commitEditor() else { return }
+        let pageDate = DistractionLog.date(forKey: data.activeDayKey) ?? Date()
         let panel = NSSavePanel()
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        panel.nameFieldStringValue = "Sidetrack — \(formatter.string(from: Date())).md"
+        panel.nameFieldStringValue = "Sidetrack — \(formatter.string(from: pageDate)).md"
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         panel.canCreateDirectories = true
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let self, let url = panel.url else { return }
-            let markdown = MarkdownExporter.render(self.data)
+            let markdown = MarkdownExporter.render(self.data, date: pageDate)
             do {
                 try markdown.write(to: url, atomically: true, encoding: .utf8)
             } catch {
@@ -250,39 +335,104 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     func resetTimer() {
-        var next = data
-        TimerEngine.reset(&next.timer, settings: next.settings)
-        replaceData(next, actionName: "Reset Timer")
+        guard data.day.status == .open else { return }
+        var nextTimer = data.timer
+        TimerEngine.reset(&nextTimer, settings: data.settings)
+        replaceTimer(nextTimer, actionName: "Reset Timer")
     }
 
     func startFreshDay() {
         guard let window else { return }
+        // Opening the sheet is a click-away boundary. Commit what is visibly
+        // in the field before any archive can be made from the model.
+        guard commitEditor() else { return }
         let alert = NSAlert()
         alert.messageText = "Leave this day here?"
         alert.informativeText = "Sidetrack will save the day as Markdown, clear the page, and offer a new beginning. Preferences and earlier counts stay."
         alert.addButton(withTitle: "Begin Fresh")
         alert.addButton(withTitle: "Stay Here")
         alert.alertStyle = .informational
+        alert.window.preventsApplicationTerminationWhenModal = false
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn, let self else { return }
-            var next = self.data
             do {
-                try self.store.archive(next, for: Date())
+                try self.archiveCurrentPageIfNeeded()
             } catch {
                 self.showArchiveFailure(error)
                 return
             }
-            next.mainTask = nil
-            next.today = []
-            next.distractionsByDay.removeValue(forKey: DistractionLog.key())
-            next.activeDayKey = DistractionLog.key()
-            next.copyIndex = CopyBank.next(next.copyIndex)
-            TimerEngine.reset(&next.timer, settings: next.settings)
-            self.replaceData(next, actionName: "Start Fresh Day")
+            var next = self.data
+            DayEngine.beginFreshDay(&next, dayKey: DistractionLog.key())
+            self.applyDayTransition(next)
         }
     }
 
+    var dayStatus: DayStatus { data.day.status }
+    var dayIsCurrent: Bool { DayEngine.isCurrentDay(data) }
+
+    func stepAway() {
+        guard data.day.status == .open else { return }
+        guard commitEditor() else { return }
+        var next = data
+        DayEngine.stepAway(&next)
+        applyDayTransition(next)
+    }
+
+    func systemSteppedAway() {
+        guard data.day.status == .open else { return }
+        guard commitEditor() else { return }
+        window?.undoManager?.removeAllActions()
+        DayEngine.stepAway(&data)
+        changed(reclaimFocus: false)
+    }
+
+    func returnToDay(resumeTimer: Bool) {
+        guard data.day.status == .away || data.day.status == .closed else { return }
+        var next = data
+        DayEngine.returnToDay(&next, resumeTimer: resumeTimer)
+        applyDayTransition(next)
+    }
+
+    func closeDay() {
+        guard data.day.status != .closed else { return }
+        guard commitEditor() else { return }
+        do {
+            try archiveCurrentPageIfNeeded()
+        } catch {
+            showArchiveFailure(error)
+            return
+        }
+        var next = data
+        DayEngine.close(&next)
+        applyDayTransition(next)
+    }
+
+    func beginToday() {
+        guard commitEditor() else { return }
+        do {
+            try archiveCurrentPageIfNeeded()
+        } catch {
+            showArchiveFailure(error)
+            return
+        }
+        var next = data
+        DayEngine.beginFreshDay(&next, dayKey: DistractionLog.key())
+        applyDayTransition(next)
+    }
+
+    func prepareToTerminate() -> Bool {
+        if editor != nil { return commitEditor() }
+        return save()
+    }
+
     func showPreferences() {
+        if let controller = preferencesController, controller.window != nil {
+            controller.refresh(settings: data.settings, display: data.display)
+            controller.showWindow(nil)
+            controller.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         let controller = PreferencesController(settings: data.settings, display: data.display) { [weak self] settings, display in
             guard let self else { return }
             self.applyPreferences(settings: settings, display: display)
@@ -296,13 +446,39 @@ final class FocusView: NSView, NSTextFieldDelegate {
     func setPresenceMode(_ mode: PresenceMode) {
         guard data.display.presence != mode else { return }
         data.display.presence = mode
+        preferencesController?.refresh(settings: data.settings, display: data.display)
         save()
         onDisplaySettingsChange?(data.display)
     }
 
     override func keyDown(with event: NSEvent) {
-        guard !event.modifierFlags.contains(.command) else { super.keyDown(with: event); return }
+        let reservedModifiers: NSEvent.ModifierFlags = [.command, .option, .control]
+        guard !event.isARepeat,
+              event.modifierFlags.intersection(reservedModifiers).isEmpty else {
+            super.keyDown(with: event)
+            return
+        }
         let key = event.charactersIgnoringModifiers?.lowercased()
+        if data.day.status == .away {
+            if !DayEngine.isCurrentDay(data) {
+                if key == "b" { beginToday(); return }
+                if key == "k" { returnToDay(resumeTimer: false); return }
+            } else {
+                if key == "b" { returnToDay(resumeTimer: true); return }
+                if key == "k" { returnToDay(resumeTimer: false); return }
+                if key == "c" { closeDay(); return }
+            }
+            if key == "f" { window?.toggleFullScreen(nil); return }
+            if key == "o" || key == "," { showPreferences(); return }
+            return
+        }
+        if data.day.status == .closed {
+            if key == "r" { returnToDay(resumeTimer: false); return }
+            if key == "b" { beginToday(); return }
+            if key == "f" { window?.toggleFullScreen(nil); return }
+            if key == "o" || key == "," { showPreferences(); return }
+            return
+        }
         if data.timer.status == .awaitingWorkChoice, key == "b" {
             TimerEngine.takeBreak(&data.timer, settings: data.settings)
             changed()
@@ -335,6 +511,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
         case "y": resetTimer()
         case "m": exportDay()
         case "a": showSavedDays()
+        case "w": stepAway()
+        case "l": closeDay()
         case "o": showPreferences()
         case "f": window?.toggleFullScreen(nil)
         case ",": showPreferences()
@@ -344,8 +522,11 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        guard data.day.status == .open else { return }
         let point = convert(event.locationInWindow, from: nil)
 
+        if mainOverflowRect.contains(point) { _ = showMainOverflowMenu(); return }
+        if todayOverflowRect.contains(point) { _ = showTodayOverflowMenu(); return }
         if mainRect.contains(point) { editMain(); return }
         if newTaskRect.contains(point) { addTask(); return }
         if preferencesRect.contains(point) { showPreferences(); return }
@@ -380,7 +561,27 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     override func rightMouseDown(with event: NSEvent) {
+        if data.day.status == .away {
+            let first = DayEngine.isCurrentDay(data)
+                ? ("Return here", "day-return")
+                : ("Begin today", "day-begin")
+            let second = DayEngine.isCurrentDay(data)
+                ? ("Close the day", "day-close")
+                : ("Keep this day", "day-return-paused")
+            showContextMenu([first, second, ("Export this day…", "export-day")], event: event)
+            return
+        }
+        if data.day.status == .closed {
+            showContextMenu([
+                ("Reopen this day", "day-return-paused"),
+                ("Begin fresh", "day-begin"),
+                ("Show saved days", "saved-days")
+            ], event: event)
+            return
+        }
         let point = convert(event.locationInWindow, from: nil)
+        if mainOverflowRect.contains(point) { _ = showMainOverflowMenu(); return }
+        if todayOverflowRect.contains(point) { _ = showTodayOverflowMenu(); return }
         for (taskID, subtaskID, check, title) in sideSubtaskRects
         where check.insetBy(dx: -6, dy: -6).contains(point) || title.contains(point) {
             showContextMenu([
@@ -427,6 +628,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
         if data.mainTask != nil { items.insert(("Add a step", "main-add-sub"), at: 1) }
         items.append(contentsOf: timerContextChoices())
         items.append(("Reset timer", "timer-reset"))
+        items.append(("Step away", "day-away"))
+        items.append(("Close the day", "day-close"))
         items.append(("Begin a fresh day…", "fresh-day"))
         items.append(("Export this day…", "export-day"))
         items.append(("Show saved days", "saved-days"))
@@ -464,12 +667,141 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private func showContextMenu(_ choices: [(String, String)], event: NSEvent) {
         let menu = NSMenu()
         for (title, command) in choices {
-            let item = NSMenuItem(title: title, action: #selector(contextAction(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = command
-            menu.addItem(item)
+            menu.addItem(commandMenuItem(title, command: command))
         }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    private func commandMenuItem(
+        _ title: String,
+        command: String,
+        indentation: Int = 0
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(contextAction(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = command
+        item.indentationLevel = indentation
+        return item
+    }
+
+    private func overflowHeading(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    private func hiddenMainSubtasks() -> [Subtask] {
+        let visible = Set(subtaskRects.map(\.0))
+        return data.mainTask?.subtasks.filter { !visible.contains($0.id) } ?? []
+    }
+
+    private var isEditingMainOverflow: Bool {
+        guard mainOverflowRect != .zero, let editorTarget else { return false }
+        switch editorTarget {
+        case .newSubtask:
+            return true
+        case .subtask(let id):
+            return !subtaskRects.contains { $0.0 == id }
+        default:
+            return false
+        }
+    }
+
+    private func hiddenTodayEntries() -> [(task: TaskItem, taskIsHidden: Bool, subtasks: [Subtask])] {
+        let visibleTasks = Set(sideRects.map(\.0))
+        let visibleSubtasks = Set(sideSubtaskRects.map(\.1))
+        return data.today.compactMap { task in
+            let taskIsHidden = !visibleTasks.contains(task.id)
+            let hiddenSubtasks = taskIsHidden
+                ? task.subtasks
+                : task.subtasks.filter { !visibleSubtasks.contains($0.id) }
+            guard taskIsHidden || !hiddenSubtasks.isEmpty else { return nil }
+            return (task, taskIsHidden, hiddenSubtasks)
+        }
+    }
+
+    private func hiddenTodayItemCount() -> Int {
+        hiddenTodayEntries().reduce(0) { partial, entry in
+            partial + (entry.taskIsHidden ? 1 : 0) + entry.subtasks.count
+        }
+    }
+
+    private var isEditingTodayOverflow: Bool {
+        guard todayOverflowRect != .zero, let editorTarget else { return false }
+        switch editorTarget {
+        case .side(let id):
+            return !sideRects.contains { $0.0 == id }
+        case .newSideSubtask(let id):
+            return !sideRects.contains { $0.0 == id }
+        case .sideSubtask(let taskID, let subtaskID):
+            return !sideSubtaskRects.contains { $0.0 == taskID && $0.1 == subtaskID }
+        default:
+            return false
+        }
+    }
+
+    @discardableResult
+    private func showMainOverflowMenu() -> Bool {
+        let hidden = hiddenMainSubtasks()
+        guard !hidden.isEmpty else { return false }
+        let menu = NSMenu()
+        for (index, step) in hidden.enumerated() {
+            if index > 0 { menu.addItem(.separator()) }
+            menu.addItem(overflowHeading(step.title))
+            menu.addItem(commandMenuItem("Rewrite", command: "main-sub-edit:\(step.id)", indentation: 1))
+            menu.addItem(commandMenuItem(
+                step.isCompleted ? "Uncheck" : "Check",
+                command: "main-sub-toggle:\(step.id)",
+                indentation: 1
+            ))
+            menu.addItem(commandMenuItem("Delete", command: "main-sub-delete:\(step.id)", indentation: 1))
+        }
+        return menu.popUp(positioning: nil, at: NSPoint(x: mainOverflowRect.minX, y: mainOverflowRect.maxY), in: self)
+    }
+
+    @discardableResult
+    private func showTodayOverflowMenu() -> Bool {
+        let hidden = hiddenTodayEntries()
+        guard !hidden.isEmpty else { return false }
+        let menu = NSMenu()
+        var needsSeparator = false
+        for entry in hidden {
+            if needsSeparator { menu.addItem(.separator()) }
+            menu.addItem(overflowHeading(entry.task.title))
+            if entry.taskIsHidden {
+                if !entry.task.isCompleted {
+                    menu.addItem(commandMenuItem("Bring forward", command: "side-promote:\(entry.task.id)", indentation: 1))
+                }
+                menu.addItem(commandMenuItem("Rewrite", command: "side-edit:\(entry.task.id)", indentation: 1))
+                menu.addItem(commandMenuItem(
+                    entry.task.isCompleted ? "Uncheck" : "Check",
+                    command: "side-toggle:\(entry.task.id)",
+                    indentation: 1
+                ))
+                menu.addItem(commandMenuItem("Add a subthought", command: "side-add-sub:\(entry.task.id)", indentation: 1))
+                menu.addItem(commandMenuItem("Delete", command: "side-delete:\(entry.task.id)", indentation: 1))
+            }
+            for subtask in entry.subtasks {
+                menu.addItem(overflowHeading("Subthought: \(subtask.title)"))
+                menu.addItem(commandMenuItem(
+                    subtask.isCompleted ? "Uncheck" : "Check",
+                    command: "side-sub-toggle:\(entry.task.id):\(subtask.id)",
+                    indentation: 1
+                ))
+                menu.addItem(commandMenuItem(
+                    "Rewrite",
+                    command: "side-sub-edit:\(entry.task.id):\(subtask.id)",
+                    indentation: 1
+                ))
+                menu.addItem(commandMenuItem(
+                    "Delete",
+                    command: "side-sub-delete:\(entry.task.id):\(subtask.id)",
+                    indentation: 1
+                ))
+            }
+            needsSeparator = true
+        }
+        return menu.popUp(positioning: nil, at: NSPoint(x: todayOverflowRect.minX, y: todayOverflowRect.maxY), in: self)
     }
 
     private func showArchiveFailure(_ error: Error) {
@@ -480,6 +812,19 @@ final class FocusView: NSView, NSTextFieldDelegate {
         )
     }
 
+    /// Away and closed pages cannot be edited, so an existing boundary archive
+    /// is still exact. Open pages are archived again because work may have
+    /// continued after the midnight safety copy.
+    private func archiveCurrentPageIfNeeded() throws {
+        let archiveDate = DistractionLog.date(forKey: data.activeDayKey) ?? Date()
+        if data.day.status != .open,
+           data.day.exactArchiveDayKey == data.activeDayKey,
+           store.hasExactArchive(matching: data, for: archiveDate) {
+            return
+        }
+        try store.archive(data, for: archiveDate)
+    }
+
     private func showWriteFailure(title: String, explanation: String, error: Error) {
         guard let window, window.attachedSheet == nil else { return }
         let alert = NSAlert()
@@ -487,6 +832,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         alert.informativeText = "\(explanation)\n\n\(error.localizedDescription)"
         alert.addButton(withTitle: "Stay Here")
         alert.alertStyle = .warning
+        alert.window.preventsApplicationTerminationWhenModal = false
         alert.beginSheetModal(for: window)
     }
 
@@ -514,6 +860,11 @@ final class FocusView: NSView, NSTextFieldDelegate {
             return
         }
         if command == "timer-reset" { resetTimer(); return }
+        if command == "day-away" { stepAway(); return }
+        if command == "day-return" { returnToDay(resumeTimer: true); return }
+        if command == "day-return-paused" { returnToDay(resumeTimer: false); return }
+        if command == "day-close" { closeDay(); return }
+        if command == "day-begin" { beginToday(); return }
         if command == "fresh-day" { startFreshDay(); return }
         if command == "export-day" { exportDay(); return }
         if command == "saved-days" { showSavedDays(); return }
@@ -552,24 +903,18 @@ final class FocusView: NSView, NSTextFieldDelegate {
             toggleSideSubtask(taskID: taskID, subtaskID: subtaskID); return
         }
 
-        var next = data
         if command == "main-delete" {
-            next.mainTask = nil
-        } else if action == "main-sub-delete", parts.count == 2, let id = UUID(uuidString: parts[1]),
-                  let index = next.mainTask?.subtasks.firstIndex(where: { $0.id == id }) {
-            next.mainTask?.subtasks.remove(at: index)
-        } else if action == "side-delete", parts.count == 2, let id = UUID(uuidString: parts[1]),
-                  let index = next.today.firstIndex(where: { $0.id == id }) {
-            next.today.remove(at: index)
+            deleteMainThought(); return
+        } else if action == "main-sub-delete", parts.count == 2, let id = UUID(uuidString: parts[1]) {
+            deleteMainStep(id); return
+        } else if action == "side-delete", parts.count == 2, let id = UUID(uuidString: parts[1]) {
+            deleteTodayThought(id); return
         } else if action == "side-sub-delete", parts.count == 3,
-                  let taskID = UUID(uuidString: parts[1]), let subtaskID = UUID(uuidString: parts[2]),
-                  let taskIndex = next.today.firstIndex(where: { $0.id == taskID }),
-                  let subtaskIndex = next.today[taskIndex].subtasks.firstIndex(where: { $0.id == subtaskID }) {
-            next.today[taskIndex].subtasks.remove(at: subtaskIndex)
+                  let taskID = UUID(uuidString: parts[1]), let subtaskID = UUID(uuidString: parts[2]) {
+            deleteTodaySubthought(taskID: taskID, subtaskID: subtaskID); return
         } else {
             return
         }
-        replaceData(next, actionName: "Delete Thought")
     }
 
     // “Centre” is a balanced editorial preset: focus opens toward the page,
@@ -641,7 +986,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
             mainX = (bounds.width - mainWidth) * 0.5 + drift.x
             sideWidth = mainWidth
             sideX = mainX
-            mainY = max(380, bounds.height * 0.40) + drift.y
+            let lowerRegisterFloor = min(380, max(280, bounds.height * 0.34))
+            mainY = max(lowerRegisterFloor, bounds.height * 0.40) + drift.y
         } else if isVertical {
             // Portrait displays still deserve a full page. Two calm columns
             // use the whole width and keep focus, rhythm, and the day list
@@ -699,7 +1045,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
             // keeps short portrait windows usable instead of colliding with
             // the Today register above.
             let visibleSteps = min(7, data.mainTask?.subtasks.count ?? 0)
-            let stepsHeight = CGFloat(visibleSteps) * 36 * CGFloat(data.display.stepsScale)
+            let stepsHeight = CGFloat(visibleSteps) * 36 * effectiveMainStepsScale
             let focusBlockHeight = titleHeight + 20 + timerHeight + 24 + stepsHeight
             let bottomBaseline = bounds.height - inset - 190 - focusBlockHeight
             mainY = max(mainY, bottomBaseline)
@@ -777,6 +1123,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
 
     private func drawMain(_ g: Geometry) {
         subtaskRects.removeAll()
+        mainOverflowRect = .zero
         let fontSize = g.mainFontSize
         let y = g.mainY
 
@@ -794,17 +1141,21 @@ final class FocusView: NSView, NSTextFieldDelegate {
                          alignment: mainTextAlignment, tracking: -0.48, lineHeight: 0.94)
             }
 
-            let stepScale = CGFloat(data.display.stepsScale)
+            let stepScale = effectiveMainStepsScale
             let followingGap = TimerView.followingContentGap * max(0.9, CGFloat(data.display.timerScale))
             var subY = min(g.timer.maxY + followingGap, bounds.height - 205)
-            let subtaskBottom = g.isVertical
-                ? (data.display.panelOrder == .todayFirst ? bounds.height - g.inset - 42 : g.sideHeadingY - 22)
-                : bounds.height - g.inset - 42
+            // In portrait's main-first arrangement, Main and Today already
+            // occupy separate columns. The steps therefore keep the full
+            // vertical register; using Today's heading as a bottom edge would
+            // put the overflow affordance above the main thought itself.
+            let subtaskBottom = bounds.height - g.inset - 42
             context.saveGState()
             context.setAlpha(secondaryAlpha)
-            for subtask in main.subtasks.prefix(7) {
+            for (index, subtask) in main.subtasks.enumerated() {
                 let rowHeight = 36 * stepScale
-                guard subY + rowHeight - 8 <= subtaskBottom else { break }
+                let hasMore = index < main.subtasks.count - 1
+                let overflowReserve = hasMore ? 28 * stepScale : 0
+                guard subY + rowHeight - 8 + overflowReserve <= subtaskBottom else { break }
                 let check = subtaskCheckRect(g, y: subY + 5, scale: stepScale)
                 let title = subtaskTitleRect(g, y: subY, scale: stepScale)
                 drawCheck(in: check, checked: subtask.isCompleted)
@@ -815,6 +1166,28 @@ final class FocusView: NSView, NSTextFieldDelegate {
                 }
                 subtaskRects.append((subtask.id, check, title))
                 subY += rowHeight
+            }
+            let hiddenCount = main.subtasks.count - subtaskRects.count
+            if hiddenCount > 0 {
+                let minimumY = min(g.timer.maxY + followingGap, subtaskBottom - 26 * stepScale)
+                let overflowY = max(minimumY, min(subY, subtaskBottom - 26 * stepScale))
+                mainOverflowRect = NSRect(
+                    x: g.mainX + 35,
+                    y: overflowY,
+                    width: g.mainWidth - 67,
+                    height: 26 * stepScale
+                )
+                let noun = hiddenCount == 1 ? "step" : "steps"
+                if !isEditingMainOverflow {
+                    drawText(
+                        "+   \(hiddenCount) more \(noun)",
+                        in: mainOverflowRect,
+                        font: Typography.italic(13 * stepScale),
+                        color: Palette.quiet,
+                        alignment: mainTextAlignment,
+                        tracking: 0.02
+                    )
+                }
             }
             context.restoreGState()
         } else {
@@ -835,6 +1208,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     private func drawToday(_ g: Geometry) {
         sideRects.removeAll()
         sideSubtaskRects.removeAll()
+        todayOverflowRect = .zero
         let displayedDate = TimeLanguage.adjusted(Date(), offsetMinutes: data.settings.clockOffsetMinutes)
         let dateScale = CGFloat(data.display.dateScale)
         let todayScale = CGFloat(data.display.todayScale)
@@ -867,20 +1241,53 @@ final class FocusView: NSView, NSTextFieldDelegate {
         context.setAlpha(secondaryAlpha)
 
         let topLimit = headingY + 92
-        let visibleSideSubtasks = bounds.width < 1100 ? 0 : (bounds.height < 720 ? 1 : 3)
+        let maximumSideSubtasks = bounds.height >= 1_100 ? 2 : (bounds.height >= 900 ? 1 : 0)
         let todayFirst = g.isVertical && data.display.panelOrder == .todayFirst
         if todayFirst {
             var cursor = topLimit
-            for task in data.today.prefix(7) {
-                let visibleSubtasks = Array(task.subtasks.prefix(visibleSideSubtasks))
-                let taskHeight = 38 * todayScale
-                let subtaskHeight = CGFloat(visibleSubtasks.count) * 27 * stepsScale
-                let blockHeight = taskHeight + subtaskHeight
-                guard cursor + blockHeight <= g.mainY - 34 else { break }
+            let listBottom = g.mainY - 68
+            todayLoop: for (index, task) in data.today.enumerated() {
+                var visibleSubtaskCount = min(maximumSideSubtasks, task.subtasks.count)
+                var visibleSubtasks: [Subtask] = []
+                var blockHeight: CGFloat = 0
+                while true {
+                    visibleSubtasks = Array(task.subtasks.prefix(visibleSubtaskCount))
+                    let taskHeight = 38 * todayScale
+                    let subtaskHeight = CGFloat(visibleSubtasks.count) * 27 * stepsScale
+                    blockHeight = taskHeight + subtaskHeight
+                    let hasMore = index < data.today.count - 1
+                        || visibleSubtaskCount < task.subtasks.count
+                    let overflowReserve = hasMore ? 28 * todayScale : 0
+                    if cursor + blockHeight + overflowReserve <= listBottom { break }
+                    guard visibleSubtaskCount > 0 else { break todayLoop }
+                    visibleSubtaskCount -= 1
+                }
                 drawTodayTask(task, at: cursor, g: g, todayScale: todayScale, stepsScale: stepsScale, visibleSubtasks: visibleSubtasks)
                 cursor += blockHeight + 13 * todayScale
             }
-            newTaskRect = NSRect(x: g.sideX, y: min(cursor, g.mainY - 30), width: g.sideWidth, height: 30 * todayScale)
+            let hiddenCount = hiddenTodayItemCount()
+            if hiddenCount > 0 {
+                let overflowHeight = 26 * todayScale
+                let overflowY = max(topLimit, min(cursor, max(topLimit, listBottom - overflowHeight)))
+                todayOverflowRect = NSRect(
+                    x: g.sideX,
+                    y: overflowY,
+                    width: g.sideWidth,
+                    height: overflowHeight
+                )
+                if !isEditingTodayOverflow {
+                    drawText(
+                        "+   \(hiddenCount) more",
+                        in: todayOverflowRect,
+                        font: Typography.italic(13 * todayScale),
+                        color: Palette.quiet,
+                        alignment: sideTextAlignment,
+                        tracking: 0.02
+                    )
+                }
+            }
+            let invitationY = todayOverflowRect == .zero ? cursor : todayOverflowRect.maxY + 4
+            newTaskRect = NSRect(x: g.sideX, y: min(invitationY, g.mainY - 30), width: g.sideWidth, height: 30 * todayScale)
         } else {
             let counterClearance: CGFloat = data.display.panelSide == .left ? 68 : 0
             newTaskRect = NSRect(
@@ -890,15 +1297,49 @@ final class FocusView: NSView, NSTextFieldDelegate {
                 height: 30 * todayScale
             )
             var cursor = newTaskRect.minY - 24
-            for task in data.today.reversed() {
-                let visibleSubtasks = Array(task.subtasks.prefix(visibleSideSubtasks))
-                let taskHeight = 38 * todayScale
-                let subtaskHeight = CGFloat(visibleSubtasks.count) * 27 * stepsScale
-                let blockHeight = taskHeight + subtaskHeight
-                let y = cursor - blockHeight
-                guard y >= topLimit else { break }
+            let requestedHeight = data.today.reduce(CGFloat.zero) { total, task in
+                total + 38 * todayScale
+                    + CGFloat(min(maximumSideSubtasks, task.subtasks.count)) * 27 * stepsScale
+                    + 13 * todayScale
+            }
+            let hasClippedSubtasks = data.today.contains { $0.subtasks.count > maximumSideSubtasks }
+            let expectsOverflow = hasClippedSubtasks || requestedHeight > cursor - topLimit
+            let contentTop = topLimit + (expectsOverflow ? 30 * todayScale : 0)
+            todayReverseLoop: for task in data.today.reversed() {
+                var visibleSubtaskCount = min(maximumSideSubtasks, task.subtasks.count)
+                var visibleSubtasks: [Subtask] = []
+                var blockHeight: CGFloat = 0
+                var y: CGFloat = 0
+                while true {
+                    visibleSubtasks = Array(task.subtasks.prefix(visibleSubtaskCount))
+                    blockHeight = 38 * todayScale
+                        + CGFloat(visibleSubtasks.count) * 27 * stepsScale
+                    y = cursor - blockHeight
+                    if y >= contentTop { break }
+                    guard visibleSubtaskCount > 0 else { break todayReverseLoop }
+                    visibleSubtaskCount -= 1
+                }
                 drawTodayTask(task, at: y, g: g, todayScale: todayScale, stepsScale: stepsScale, visibleSubtasks: visibleSubtasks)
                 cursor = y - 13 * todayScale
+            }
+            let hiddenCount = hiddenTodayItemCount()
+            if hiddenCount > 0 {
+                todayOverflowRect = NSRect(
+                    x: g.sideX,
+                    y: topLimit,
+                    width: g.sideWidth,
+                    height: 26 * todayScale
+                )
+                if !isEditingTodayOverflow {
+                    drawText(
+                        "+   \(hiddenCount) more",
+                        in: todayOverflowRect,
+                        font: Typography.italic(13 * todayScale),
+                        color: Palette.quiet,
+                        alignment: sideTextAlignment,
+                        tracking: 0.02
+                    )
+                }
             }
         }
         if editorTarget != .newTask {
@@ -984,6 +1425,40 @@ final class FocusView: NSView, NSTextFieldDelegate {
             mainOrder.append(element)
         }
 
+        let hiddenMain = hiddenMainSubtasks()
+        if !hiddenMain.isEmpty, mainOverflowRect != .zero, !isEditingMainOverflow {
+            var actions: [NSAccessibilityCustomAction] = []
+            for step in hiddenMain {
+                actions.append(accessibilityAction("Rewrite step: \(step.title)") { [weak self] in
+                    self?.beginEditing(.subtask(step.id), text: step.title)
+                    return self != nil
+                })
+                actions.append(accessibilityAction(
+                    "\(step.isCompleted ? "Uncheck" : "Check") step: \(step.title)"
+                ) { [weak self] in
+                    self?.toggleSubtask(step.id)
+                    return self != nil
+                })
+                actions.append(accessibilityAction("Delete step: \(step.title)") { [weak self] in
+                    self?.deleteMainStep(step.id)
+                    return self != nil
+                })
+            }
+            let noun = hiddenMain.count == 1 ? "step" : "steps"
+            let element = configureAccessibilityElement(
+                key: "main-overflow",
+                role: .button,
+                frame: mainOverflowRect.insetBy(dx: -5, dy: -4),
+                label: "\(hiddenMain.count) more \(noun)",
+                help: "Press to reach the steps that do not fit on this screen.",
+                value: hiddenMain.count,
+                onPress: { [weak self] in self?.showMainOverflowMenu() ?? false },
+                actions: actions
+            )
+            usedKeys.insert("main-overflow")
+            mainOrder.append(element)
+        }
+
         let sortedSideRects = sideRects.sorted { $0.2.minY < $1.2.minY }
         for (id, check, title, _) in sortedSideRects {
             guard let task = data.today.first(where: { $0.id == id }) else { continue }
@@ -1061,6 +1536,74 @@ final class FocusView: NSView, NSTextFieldDelegate {
             }
         }
 
+
+        let hiddenToday = hiddenTodayEntries()
+        if !hiddenToday.isEmpty, todayOverflowRect != .zero, !isEditingTodayOverflow {
+            var actions: [NSAccessibilityCustomAction] = []
+            for entry in hiddenToday {
+                let task = entry.task
+                if entry.taskIsHidden {
+                    if !task.isCompleted {
+                        actions.append(accessibilityAction("Bring forward: \(task.title)") { [weak self] in
+                            guard let self,
+                                  let index = self.data.today.firstIndex(where: { $0.id == task.id }) else {
+                                return false
+                            }
+                            self.promote(at: index)
+                            return true
+                        })
+                    }
+                    actions.append(accessibilityAction("Rewrite thought: \(task.title)") { [weak self] in
+                        self?.beginEditing(.side(task.id), text: task.title)
+                        return self != nil
+                    })
+                    actions.append(accessibilityAction(
+                        "\(task.isCompleted ? "Uncheck" : "Check") thought: \(task.title)"
+                    ) { [weak self] in
+                        self?.toggleSide(task.id)
+                        return self != nil
+                    })
+                    actions.append(accessibilityAction("Add a subthought to: \(task.title)") { [weak self] in
+                        self?.beginEditing(.newSideSubtask(task.id), text: "")
+                        return self != nil
+                    })
+                    actions.append(accessibilityAction("Delete thought: \(task.title)") { [weak self] in
+                        self?.deleteTodayThought(task.id)
+                        return self != nil
+                    })
+                }
+                for subtask in entry.subtasks {
+                    actions.append(accessibilityAction(
+                        "\(subtask.isCompleted ? "Uncheck" : "Check") subthought: \(subtask.title)"
+                    ) { [weak self] in
+                        self?.toggleSideSubtask(taskID: task.id, subtaskID: subtask.id)
+                        return self != nil
+                    })
+                    actions.append(accessibilityAction("Rewrite subthought: \(subtask.title)") { [weak self] in
+                        self?.beginEditing(.sideSubtask(task.id, subtask.id), text: subtask.title)
+                        return self != nil
+                    })
+                    actions.append(accessibilityAction("Delete subthought: \(subtask.title)") { [weak self] in
+                        self?.deleteTodaySubthought(taskID: task.id, subtaskID: subtask.id)
+                        return self != nil
+                    })
+                }
+            }
+            let count = hiddenTodayItemCount()
+            let element = configureAccessibilityElement(
+                key: "today-overflow",
+                role: .button,
+                frame: todayOverflowRect.insetBy(dx: -5, dy: -4),
+                label: "\(count) more from today",
+                help: "Press to reach the thoughts and subthoughts that do not fit on this screen.",
+                value: count,
+                onPress: { [weak self] in self?.showTodayOverflowMenu() ?? false },
+                actions: actions
+            )
+            usedKeys.insert("today-overflow")
+            todayOrder.append(element)
+        }
+
         let newThoughtElement = configureAccessibilityElement(
             key: "new-thought",
             role: .button,
@@ -1109,18 +1652,25 @@ final class FocusView: NSView, NSTextFieldDelegate {
         accessibilityElementCache[key] = element
         element.setAccessibilityParent(self)
         element.setAccessibilityRole(role)
-        element.setAccessibilityEnabled(true)
+        let enabled = data.day.status == .open || role == .staticText
+        element.setAccessibilityEnabled(enabled)
         element.setAccessibilityFrameInParentSpace(frame)
         element.setAccessibilityLabel(label)
         element.setAccessibilityHelp(help)
         element.setAccessibilityValue(value)
-        element.onPress = onPress
-        element.setAccessibilityCustomActions(actions.isEmpty ? nil : actions)
+        element.onPress = enabled ? { [weak self] in
+            guard self?.data.day.status == .open else { return false }
+            return onPress?() ?? false
+        } : nil
+        element.setAccessibilityCustomActions(enabled && !actions.isEmpty ? actions : nil)
         return element
     }
 
     private func accessibilityAction(_ name: String, perform: @escaping () -> Bool) -> NSAccessibilityCustomAction {
-        NSAccessibilityCustomAction(name: name, handler: perform)
+        NSAccessibilityCustomAction(name: name) { [weak self] in
+            guard self?.data.day.status == .open else { return false }
+            return perform()
+        }
     }
 
     private func drawTodayTask(
@@ -1172,18 +1722,24 @@ final class FocusView: NSView, NSTextFieldDelegate {
             TimerEngine.startAgain(&self.data.timer, settings: self.data.settings)
             self.changed()
         }
+        timerView.onReturnToDay = { [weak self] resume in
+            self?.returnToDay(resumeTimer: resume)
+        }
+        timerView.onCloseDay = { [weak self] in self?.closeDay() }
+        timerView.onBeginToday = { [weak self] in self?.beginToday() }
     }
 
     @discardableResult
-    private func refreshTimer() -> TimerEvent {
+    private func refreshTimer(now: Date = Date()) -> TimerEvent {
         TimerEngine.ensurePhaseMetadata(&data.timer, settings: data.settings)
-        let event = TimerEngine.refresh(&data.timer)
+        let event = TimerEngine.refresh(&data.timer, now: now)
         if event != .none, data.settings.chimeEnabled {
             NSSound(named: NSSound.Name("Glass"))?.play()
         }
         timerView.update(timer: data.timer, settings: data.settings,
+                         day: data.day, isCurrentDay: DayEngine.isCurrentDay(data),
                          scale: CGFloat(data.display.timerScale), gentle: event != .none,
-                         overrun: TimerEngine.overrunCue(data.timer))
+                         overrun: data.day.status == .open ? TimerEngine.overrunCue(data.timer) : .none)
         return event
     }
 
@@ -1192,8 +1748,9 @@ final class FocusView: NSView, NSTextFieldDelegate {
         data.display = display
         TimerEngine.resetDurationIfIdle(&data.timer, settings: settings)
         timerView.update(timer: data.timer, settings: data.settings,
+                         day: data.day, isCurrentDay: DayEngine.isCurrentDay(data),
                          scale: CGFloat(data.display.timerScale), gentle: false,
-                         overrun: TimerEngine.overrunCue(data.timer))
+                         overrun: data.day.status == .open ? TimerEngine.overrunCue(data.timer) : .none)
         updateCounter()
         save()
         needsLayout = true
@@ -1201,61 +1758,105 @@ final class FocusView: NSView, NSTextFieldDelegate {
         onDisplaySettingsChange?(display)
     }
 
-    private func changed(gentle: Bool = false, reclaimFocus: Bool = true) {
+    @discardableResult
+    private func changed(gentle: Bool = false, reclaimFocus: Bool = true) -> Bool {
+        refreshChangedPresentation(gentle: gentle, reclaimFocus: reclaimFocus)
+        return save()
+    }
+
+    private func refreshChangedPresentation(gentle: Bool = false, reclaimFocus: Bool = true) {
         timerView.update(timer: data.timer, settings: data.settings,
+                         day: data.day, isCurrentDay: DayEngine.isCurrentDay(data),
                          scale: CGFloat(data.display.timerScale), gentle: gentle,
-                         overrun: TimerEngine.overrunCue(data.timer))
+                         overrun: data.day.status == .open ? TimerEngine.overrunCue(data.timer) : .none)
         updateCounter()
-        save()
+        if data.day.status != .open {
+            for element in accessibilityElementCache.values
+            where element.accessibilityRole() != .staticText {
+                element.setAccessibilityEnabled(false)
+            }
+        }
         needsLayout = true
         needsDisplay = true
         if reclaimFocus { window?.makeFirstResponder(self) }
     }
 
     @discardableResult
-    private func rollOverDayIfNeeded(now: Date = Date(), calendar: Calendar = .current) -> Bool {
-        let today = DistractionLog.key(for: now, calendar: calendar)
-        guard data.activeDayKey != today else { return false }
-
-        if let previousDate = DistractionLog.date(forKey: data.activeDayKey, calendar: calendar) {
-            do {
-                try store.archive(data, for: previousDate, calendar: calendar)
-            } catch {
-                return false
-            }
+    private func safetyArchiveIfNeeded(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard DayEngine.needsSafetyArchive(data, now: now, calendar: calendar),
+              let previousDate = DistractionLog.date(forKey: data.activeDayKey, calendar: calendar) else {
+            return false
         }
-        data.activeDayKey = today
-        data.copyIndex = CopyBank.next(data.copyIndex)
+        do {
+            try store.archive(data, for: previousDate, calendar: calendar)
+        } catch {
+            return false
+        }
+        data.day.safetyArchivedDayKey = data.activeDayKey
+        data.day.exactArchiveDayKey = data.activeDayKey
         save()
         return true
     }
 
     private func updateCounter() {
-        counterView.count = data.distractionsByDay[DistractionLog.key(), default: 0]
+        counterView.count = data.distractionsByDay[data.activeDayKey, default: 0]
         counterView.oneThing = data.oneThing
         counterView.oneThingPlaceholder = CopyBank.oneThingPrompt(index: data.copyIndex)
         counterView.textScale = CGFloat(data.display.counterScale)
-        counterView.alphaValue = oledDimActive ? 0.22 : (data.timer.status == .running ? 0.36 : 1)
+        counterView.setAccessibilityEnabled(data.day.status == .open)
+        if data.day.status != .open {
+            counterView.alphaValue = 0.24
+        } else {
+            counterView.alphaValue = oledDimActive ? 0.22 : (data.timer.status == .running ? 0.36 : 1)
+        }
     }
 
     private func replaceData(_ replacement: AppData, actionName: String) {
-        let previous = data
+        let previousMain = data.mainTask
+        let previousToday = data.today
         window?.undoManager?.registerUndo(withTarget: self) { target in
-            target.replaceData(previous, actionName: actionName)
+            var previousPage = target.data
+            previousPage.mainTask = previousMain
+            previousPage.today = previousToday
+            target.replaceData(previousPage, actionName: actionName)
         }
         window?.undoManager?.setActionName(actionName)
+        let previous = data
+        var next = data
+        next.mainTask = replacement.mainTask
+        next.today = replacement.today
+        DayEngine.invalidateSafetyArchiveIfPageChanged(&next, comparedTo: previous)
+        data = next
+        changed()
+    }
+
+    private func replaceTimer(_ replacement: FocusTimer, actionName: String) {
+        let previous = data.timer
+        window?.undoManager?.registerUndo(withTarget: self) { target in
+            target.replaceTimer(previous, actionName: actionName)
+        }
+        window?.undoManager?.setActionName(actionName)
+        data.timer = replacement
+        changed()
+    }
+
+    private func applyDayTransition(_ replacement: AppData) {
+        // A day boundary has its own visible recovery path. Letting an older
+        // task undo restore a captured running timer would bypass that choice.
+        window?.undoManager?.removeAllActions()
         data = replacement
         changed()
     }
 
     private func deleteMainThought() {
-        guard data.mainTask != nil else { return }
+        guard commitActiveEditorIfNeeded(), data.mainTask != nil else { return }
         var next = data
         next.mainTask = nil
         replaceData(next, actionName: "Delete Main Thought")
     }
 
     private func deleteMainStep(_ id: UUID) {
+        guard commitActiveEditorIfNeeded() else { return }
         var next = data
         guard let index = next.mainTask?.subtasks.firstIndex(where: { $0.id == id }) else { return }
         next.mainTask?.subtasks.remove(at: index)
@@ -1263,6 +1864,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func deleteTodayThought(_ id: UUID) {
+        guard commitActiveEditorIfNeeded() else { return }
         var next = data
         guard let index = next.today.firstIndex(where: { $0.id == id }) else { return }
         next.today.remove(at: index)
@@ -1270,6 +1872,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func deleteTodaySubthought(taskID: UUID, subtaskID: UUID) {
+        guard commitActiveEditorIfNeeded() else { return }
         var next = data
         guard let taskIndex = next.today.firstIndex(where: { $0.id == taskID }),
               let subtaskIndex = next.today[taskIndex].subtasks.firstIndex(where: { $0.id == subtaskID }) else { return }
@@ -1278,6 +1881,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func toggleSubtask(_ id: UUID) {
+        guard commitActiveEditorIfNeeded() else { return }
         var next = data
         guard var main = next.mainTask,
               let index = main.subtasks.firstIndex(where: { $0.id == id }) else { return }
@@ -1293,6 +1897,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func toggleSide(_ id: UUID) {
+        guard commitActiveEditorIfNeeded() else { return }
         var next = data
         guard let index = next.today.firstIndex(where: { $0.id == id }) else { return }
         next.today[index].isCompleted.toggle()
@@ -1300,6 +1905,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func toggleSideSubtask(taskID: UUID, subtaskID: UUID) {
+        guard commitActiveEditorIfNeeded() else { return }
         var next = data
         guard let taskIndex = next.today.firstIndex(where: { $0.id == taskID }),
               let subtaskIndex = next.today[taskIndex].subtasks.firstIndex(where: { $0.id == subtaskID }) else { return }
@@ -1310,7 +1916,9 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func promote(at index: Int) {
-        guard data.today.indices.contains(index), !data.today[index].isCompleted else { return }
+        guard commitActiveEditorIfNeeded(),
+              data.today.indices.contains(index),
+              !data.today[index].isCompleted else { return }
         var replacement = data
         let promoted = replacement.today.remove(at: index)
         if let current = replacement.mainTask { replacement.today.insert(current, at: 0) }
@@ -1319,7 +1927,8 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func beginEditing(_ target: EditorTarget, text: String) {
-        cancelEditor()
+        if editor != nil, !commitEditor() { return }
+        let text = currentText(for: target) ?? text
         let field = RitualTextField(frame: .zero)
         field.stringValue = text
         field.font = editorFont(for: target)
@@ -1362,7 +1971,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
         field.cell?.wraps = wraps
         field.cell?.isScrollable = !wraps
         field.cell?.usesSingleLineMode = !wraps
-        field.onCommit = { [weak self] in self?.commitEditor() }
+        field.onCommit = { [weak self] in _ = self?.commitEditor() }
         field.onCancel = { [weak self] in self?.cancelEditor() }
         field.delegate = self
         field.target = self
@@ -1383,11 +1992,11 @@ final class FocusView: NSView, NSTextFieldDelegate {
         }
     }
 
-    @objc private func commitEditorAction() { commitEditor() }
+    @objc private func commitEditorAction() { _ = commitEditor() }
 
     func controlTextDidEndEditing(_ notification: Notification) {
         guard let field = notification.object as? RitualTextField, editor === field else { return }
-        commitEditor()
+        _ = commitEditor()
     }
 
     func controlTextDidChange(_ notification: Notification) {
@@ -1406,12 +2015,24 @@ final class FocusView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    private func commitEditor() {
-        guard let field = editor, let target = editorTarget else { return }
+    @discardableResult
+    private func commitEditor() -> Bool {
+        guard let field = editor, let target = editorTarget else { return save() }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty || target == .oneThing { apply(text, to: target) }
+        var candidate = data
+        if !text.isEmpty || target == .oneThing {
+            apply(text, to: target, in: &candidate)
+            DayEngine.invalidateSafetyArchiveIfPageChanged(&candidate, comparedTo: data)
+        }
+        guard persist(candidate) else {
+            window?.makeFirstResponder(field)
+            return false
+        }
+        data = candidate
+        refreshChangedPresentation(reclaimFocus: false)
         finishEditor()
-        changed()
+        window?.makeFirstResponder(self)
+        return true
     }
 
     private func cancelEditor() {
@@ -1421,14 +2042,24 @@ final class FocusView: NSView, NSTextFieldDelegate {
     }
 
     private func finishEditor() {
-        editor?.removeFromSuperview()
+        // Detaching an NSTextField can synchronously emit end-editing. Clear
+        // identity first so that callback cannot commit a creation target a
+        // second time while the field is being removed.
+        let field = editor
         editor = nil
         editorTarget = nil
+        field?.delegate = nil
+        field?.target = nil
+        field?.removeFromSuperview()
         counterView.hidesOneThing = false
         needsDisplay = true
     }
 
-    private func apply(_ text: String, to target: EditorTarget) {
+    private func commitActiveEditorIfNeeded() -> Bool {
+        editor == nil || commitEditor()
+    }
+
+    private func apply(_ text: String, to target: EditorTarget, in data: inout AppData) {
         switch target {
         case .main:
             if data.mainTask == nil { data.mainTask = TaskItem(title: text) }
@@ -1456,8 +2087,46 @@ final class FocusView: NSView, NSTextFieldDelegate {
         }
     }
 
+    private func currentText(for target: EditorTarget) -> String? {
+        switch target {
+        case .main:
+            return data.mainTask?.title
+        case .oneThing:
+            return data.oneThing
+        case .side(let id):
+            return data.today.first(where: { $0.id == id })?.title
+        case .subtask(let id):
+            return data.mainTask?.subtasks.first(where: { $0.id == id })?.title
+        case .sideSubtask(let taskID, let subtaskID):
+            return data.today.first(where: { $0.id == taskID })?
+                .subtasks.first(where: { $0.id == subtaskID })?.title
+        case .newTask, .newSubtask, .newSideSubtask:
+            return nil
+        }
+    }
+
     private func editorFrame(for target: EditorTarget?, geometry g: Geometry) -> NSRect {
         guard let target else { return .zero }
+        let hiddenMainFrame: NSRect = {
+            let anchor = mainOverflowRect == .zero
+                ? NSRect(x: g.mainX + 35, y: g.timer.maxY + 18, width: g.mainWidth - 67, height: 30)
+                : mainOverflowRect
+            return NSRect(
+                x: g.mainX + 35,
+                y: anchor.minY - 3,
+                width: max(40, g.mainWidth - 67),
+                height: max(30, anchor.height + 6)
+            )
+        }()
+        let hiddenTodayFrame: NSRect = {
+            let anchor = todayOverflowRect == .zero ? newTaskRect : todayOverflowRect
+            return NSRect(
+                x: g.sideX,
+                y: anchor.minY - 3,
+                width: max(40, g.sideWidth),
+                height: max(30, anchor.height + 6)
+            )
+        }()
         switch target {
         case .main:
             let value = editor?.stringValue.isEmpty == false
@@ -1483,15 +2152,20 @@ final class FocusView: NSView, NSTextFieldDelegate {
             let y = subtaskRects.last.map { $0.2.maxY + 8 } ?? g.timer.maxY + 22
             return NSRect(x: g.mainX + 42, y: y, width: g.mainWidth - 45, height: 30)
         case .newSideSubtask(let id):
-            guard let taskRect = sideRects.first(where: { $0.0 == id })?.2 else { return .zero }
+            guard let taskRect = sideRects.first(where: { $0.0 == id })?.2 else {
+                return hiddenTodayFrame
+            }
             let y = sideSubtaskRects.filter { $0.0 == id }.map(\.3.maxY).max() ?? taskRect.maxY
             return NSRect(x: g.sideX + 39, y: y, width: g.sideWidth - 39, height: 29)
         case .side(let id):
-            return sideRects.first(where: { $0.0 == id })?.2.insetBy(dx: -4, dy: -3) ?? .zero
+            return sideRects.first(where: { $0.0 == id })?.2.insetBy(dx: -4, dy: -3)
+                ?? hiddenTodayFrame
         case .subtask(let id):
-            return subtaskRects.first(where: { $0.0 == id })?.2.insetBy(dx: -4, dy: -3) ?? .zero
+            return subtaskRects.first(where: { $0.0 == id })?.2.insetBy(dx: -4, dy: -3)
+                ?? hiddenMainFrame
         case .sideSubtask(let taskID, let subtaskID):
-            return sideSubtaskRects.first(where: { $0.0 == taskID && $0.1 == subtaskID })?.3.insetBy(dx: -4, dy: -3) ?? .zero
+            return sideSubtaskRects.first(where: { $0.0 == taskID && $0.1 == subtaskID })?.3.insetBy(dx: -4, dy: -3)
+                ?? hiddenTodayFrame
         }
     }
 
@@ -1502,7 +2176,7 @@ final class FocusView: NSView, NSTextFieldDelegate {
             return Typography.roman(min(64 * scale, max(34 * scale, bounds.width * 0.032 * scale)))
         case .oneThing: return Typography.roman(13 * CGFloat(data.display.counterScale))
         case .newTask, .side: return Typography.roman(16 * CGFloat(data.display.todayScale))
-        case .newSubtask, .subtask: return Typography.roman(17 * CGFloat(data.display.stepsScale))
+        case .newSubtask, .subtask: return Typography.roman(17 * effectiveMainStepsScale)
         case .newSideSubtask, .sideSubtask: return Typography.italic(13 * CGFloat(data.display.stepsScale))
         }
     }

@@ -30,6 +30,8 @@ public enum TimerOverrunCue: Equatable {
 }
 
 public enum TimerEngine {
+    public static let focusExtensionSeconds = 15 * 60
+
     public static func secondsRemaining(_ timer: FocusTimer, now: Date = Date()) -> Int {
         guard timer.status == .running, let endsAt = timer.endsAt else {
             return max(0, timer.remainingSeconds)
@@ -123,9 +125,9 @@ public enum TimerEngine {
     public static func keepWorking(_ timer: inout FocusTimer, now: Date = Date()) {
         guard timer.status == .awaitingWorkChoice else { return }
         timer.phase = .work
-        timer.remainingSeconds = 5 * 60
-        timer.endsAt = now.addingTimeInterval(5 * 60)
-        timer.phaseDurationSeconds = 5 * 60
+        timer.remainingSeconds = focusExtensionSeconds
+        timer.endsAt = now.addingTimeInterval(TimeInterval(focusExtensionSeconds))
+        timer.phaseDurationSeconds = focusExtensionSeconds
         timer.phaseEndedAt = nil
         timer.status = .running
     }
@@ -158,6 +160,85 @@ public enum TimerEngine {
             phaseDurationSeconds: settings.workMinutes * 60,
             phaseEndedAt: nil
         )
+    }
+
+    /// Repairs structurally readable state loaded from disk. This is narrow on
+    /// purpose: human text is untouched; only combinations the timer itself
+    /// can never produce are brought back to a safe, explicit state.
+    public static func repairLoadedState(
+        _ timer: inout FocusTimer,
+        settings: PomodoroSettings,
+        now: Date = Date()
+    ) {
+        var canonicalizedPhase = false
+        if timer.status == .awaitingWorkChoice, timer.phase != .work {
+            timer.phase = .work
+            canonicalizedPhase = true
+        } else if timer.status == .awaitingBreakChoice, timer.phase == .work {
+            timer.phase = .shortBreak
+            canonicalizedPhase = true
+        }
+        let configured = duration(for: timer.phase, settings: settings)
+        let maximumDuration = 180 * 60
+        if !canonicalizedPhase,
+           let storedDuration = timer.phaseDurationSeconds,
+           (60...maximumDuration).contains(storedDuration) {
+            timer.phaseDurationSeconds = storedDuration
+        } else {
+            timer.phaseDurationSeconds = configured
+        }
+        timer.completedCyclesInSet = min(
+            max(timer.completedCyclesInSet, 0),
+            max(settings.cyclesPerSet - 1, 0)
+        )
+        timer.remainingSeconds = min(max(timer.remainingSeconds, 0), maximumDuration)
+
+        switch timer.status {
+        case .idle:
+            timer.phase = .work
+            timer.remainingSeconds = settings.workMinutes * 60
+            timer.endsAt = nil
+            timer.phaseDurationSeconds = settings.workMinutes * 60
+            timer.phaseEndedAt = nil
+
+        case .paused:
+            timer.endsAt = nil
+            timer.phaseEndedAt = nil
+            if timer.remainingSeconds == 0 {
+                timer.remainingSeconds = configured
+            }
+
+        case .running:
+            guard let endsAt = timer.endsAt else {
+                // A running timer without a deadline cannot tell how much time
+                // passed. Pause it instead of inventing a finish.
+                timer.status = .paused
+                timer.remainingSeconds = timer.remainingSeconds > 0 ? timer.remainingSeconds : configured
+                timer.phaseEndedAt = nil
+                return
+            }
+            let remaining = max(0, Int(ceil(endsAt.timeIntervalSince(now))))
+            if remaining == 0 {
+                _ = refresh(&timer, now: now)
+            } else {
+                let safeRemaining = min(remaining, maximumDuration)
+                timer.remainingSeconds = safeRemaining
+                if remaining > maximumDuration {
+                    timer.endsAt = now.addingTimeInterval(TimeInterval(safeRemaining))
+                }
+                timer.phaseEndedAt = nil
+            }
+
+        case .awaitingWorkChoice:
+            timer.remainingSeconds = 0
+            timer.endsAt = nil
+            timer.phaseEndedAt = timer.phaseEndedAt ?? now
+
+        case .awaitingBreakChoice:
+            timer.remainingSeconds = 0
+            timer.endsAt = nil
+            timer.phaseEndedAt = timer.phaseEndedAt ?? now
+        }
     }
 
     private static func duration(for phase: TimerPhase, settings: PomodoroSettings) -> Int {

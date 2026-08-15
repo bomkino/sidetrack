@@ -24,10 +24,15 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - Preferences preview live as you change them; there is no save-and-guess loop.
 - Gives each quiet layer its own bounded size control—main thought, rhythm, Today list, steps, date/time, and distraction count.
 - Offers OLED dim mode: when focus is running, the background becomes true black and the thought, rhythm, and time remain awake while everything else recedes.
-- Adapts cleanly down to a 900 × 600 window: the main sentence reflows and scales, while low-priority subthoughts step out before the page becomes crowded.
+- Fits a 720 × 1280 logical portrait display without crossing onto the main screen. Ordinary windows keep a useful 640 × 900 floor; the main sentence reflows while low-priority thoughts step out before the page becomes crowded.
 - Holds one editable main thought plus one level of subthoughts.
 - Lets later thoughts and their subthoughts gather upward from the bottom margin.
+- Never hides saved words behind a row cap. When a compact screen runs out of room, one restrained `+ N more` line opens native actions for every remaining thought, step, and subthought.
+- Gives the day three honest edges: open, away, and closed. Stepping away holds a moving timer; returning asks whether to resume it. Closing archives first and leaves the page reopenable.
+- Notices only explicit local events: your `Step Away` or `Close the Day` action, screen sleep, and macOS session lock. Wake-up never restarts the day. Sidetrack does not inspect application usage or guess from silence.
+- Safety-archives yesterday once after a calendar change, then waits with the old page exactly where you left it. `Begin today` is always a choice, never a midnight ambush.
 - Runs a manual `50 / 12 / 50 / 12 / 50 / 30` focus rhythm.
+- Extends a finished focus by fifteen minutes when you choose “Keep working.” “Not yet” leaves a finished rest open-ended; neither path nags every five minutes.
 - Fades secondary material during focus.
 - Uses stable, literal timer states—Ready, Focus underway, Focus paused, Short rest underway, Long rest underway—and always says what a click will do.
 - If a finished focus or rest waits for you, it whispers rather than notifying: one slow text breath at 2× the phase length, a glyph-aware hairline at 3× that leaves room for descenders, both at 4×, then silence at 5× for a likely away-from-keyboard stretch.
@@ -57,11 +62,15 @@ Read [PHILOSOPHY.md](PHILOSOPHY.md) for the thinking behind it.
 - `Y` — reset the rhythm only
 - `M` — export the day as Markdown
 - `A` — reveal automatically saved days
+- `W` — step away; hold a running focus or rest
+- `L` — archive and close the day
 - `O` or `,` — preferences
 - `F` or `⌃⌘F` — enter or leave full screen
 - `⌘Z` — undo checking, promotion, deletion, or reset
 
 When focus finishes, `B` begins the break and `K` keeps working. When a break finishes, `S` starts focus and `N` waits.
+
+When you are away, `B` returns and resumes a timer Sidetrack held, `K` returns with it paused, and `C` closes the day. On an older page, `B` begins today and `K` keeps that page. When the day is closed, `R` reopens it and `B` begins fresh. The visible choices always repeat these outcomes in plain language.
 
 Click circles to check items. Click a later thought to promote it. Right-click thoughts, subthoughts, or open space for the actions that belong there.
 
@@ -75,15 +84,17 @@ Sidetrack never uses the network. Runtime data lives at:
 
 The file is pretty-printed JSON. Sidetrack keeps the prior good write beside it as `sidetrack.previous.json`; if the primary file disappears or becomes unreadable, the backup restores it. Unreadable source data is preserved as `sidetrack.unreadable.json` instead of being silently discarded.
 
-At day change, Sidetrack writes the previous day to:
+At a calendar change, Sidetrack safety-archives the previous page once to:
 
 ```text
 ~/Library/Application Support/Sidetrack/Days/YYYY-MM-DD.md
 ```
 
-Starting fresh twice never overwrites the first page; later copies receive `-2`, `-3`, and so on.
+The page does not clear until you choose `Begin today`. Starting fresh twice never overwrites the first page; later copies receive `-2`, `-3`, and so on.
 
-Press `A` to reveal that folder. Manual export uses a normal macOS save panel and creates a plain `.md` file wherever you choose.
+Sidetrack does not connect to Computer History, Chronicle, Screen Time, accessibility input monitoring, or any analytics service. Those tools can help a person reconstruct a day; they are deliberately not permission for this quiet display to watch one.
+
+Press `A` to reveal that folder. Manual export uses a normal macOS save panel, keeps the viewed page’s date even after midnight, and creates a plain `.md` file wherever you choose.
 
 ## Build
 
@@ -91,10 +102,12 @@ Requires macOS 13 or newer and Apple Command Line Tools.
 
 ```sh
 Scripts/test.sh
+Scripts/stress-test.sh
+Scripts/app-stress-test.sh
 Scripts/build-app.sh
 ```
 
-The unpacked app appears at `build/Sidetrack.app`; a clean signed install archive appears beside it as `build/Sidetrack.app.zip`. The build creates one universal binary, verifies its Intel and Apple-silicon slices, and pins both to macOS 13. It uses `swiftc` directly, so no full Xcode install is required.
+The unpacked app appears at `build/Sidetrack.app`; a clean ad-hoc-signed install archive appears beside it as `build/Sidetrack.app.zip`. The build creates one universal binary, verifies its Intel and Apple-silicon slices, and pins both to macOS 13. It uses `swiftc` directly, so no full Xcode install is required. This public build is not Developer ID signed or notarized; macOS may therefore ask a person to confirm the first launch.
 
 Small, careful contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing Sidetrack’s interaction or visual language.
 
@@ -104,13 +117,13 @@ Sidetrack is native AppKit with custom event-driven drawing. No continuous rende
 
 The overrun whisper performs one finite Core Animation breath when each late threshold arrives, then the display cycle sleeps again. It never becomes a second-by-second countdown or a permanent animation loop.
 
-Measured in full-screen on a 1920 × 1080 logical second display after the current polish pass:
+Measured locally across the 1920 × 1080 windowed/full-screen pass and the final 720 × 1280 portrait candidate:
 
 - `0.0%` CPU between minute updates; one brief redraw on the minute, then the process sleeps again
-- roughly `44–55 MB` resident memory in the final windowed resize pass; on a 2160 × 3840 physical portrait display, macOS may retain about `90 MB` of physical footprint for the native full-screen backing surface, stable while idle rather than a growing allocation
-- `1.5 MB` universal executable; `4.1 MB` installed app bundle including font and icon
+- roughly `23–32 MB` resident memory while the dense portrait candidate settled; on a 2160 × 3840 physical portrait display, macOS may report a larger physical footprint for the native full-screen backing surface, stable while idle rather than a growing allocation
+- `1.9 MB` universal executable; `4.6 MB` installed app bundle including font and icon
 
-The compact layout survived 40 rapid resizes across 900 × 600, 1000 × 700, 1200 × 760, 1440 × 900, and 1920 × 1049. A separate burst of 202 timer and counter actions completed in under one second without a lost write or damaged backup.
+The compact layout survived 606 rendered AppKit geometries using the shipped typeface, including frames smaller than the supported minimum. Those checks exercise overflow reachability, real text fields, native undo boundaries, VoiceOver presses, and malformed local files—not just non-empty screenshots. The live pass added 180 rapid resizes, repeated menu/full-screen/Mission Control churn on the real 720 × 1280 side display, and a settled return to `0.0%` CPU. Core stress covers 256,000 reachable action sequences plus malformed-state and damaged-file recovery; those tests are part of GitHub CI rather than a one-off receipt.
 
 ## Freedom
 

@@ -48,6 +48,45 @@ final class PreferencesController: NSWindowController, NSTextFieldDelegate {
 
     required init?(coder: NSCoder) { nil }
 
+    func refresh(settings: PomodoroSettings, display: DisplaySettings) {
+        isConfiguring = true
+        defer { isConfiguring = false }
+
+        workField.integerValue = settings.workMinutes
+        breakField.integerValue = settings.breakMinutes
+        longBreakField.integerValue = settings.longBreakMinutes
+        cyclesField.integerValue = settings.cyclesPerSet
+        clockField.stringValue = settings.clockOffsetMinutes >= 0
+            ? "+\(settings.clockOffsetMinutes)"
+            : "\(settings.clockOffsetMinutes)"
+        chimeButton.state = settings.chimeEnabled ? .on : .off
+
+        select(display.placement.rawValue, in: placementPopup)
+        select(display.orientation.rawValue, in: orientationPopup)
+        select(display.panelSide.rawValue, in: panelSidePopup)
+        select(display.alignment.rawValue, in: alignmentPopup)
+        select(display.panelOrder.rawValue, in: orderPopup)
+        select(display.presence.rawValue, in: presencePopup)
+        oledButton.state = display.oledDimEnabled ? .on : .off
+
+        setScale(display.mainScale, on: mainScale)
+        setScale(display.timerScale, on: timerScale)
+        setScale(display.todayScale, on: todayScale)
+        setScale(display.stepsScale, on: stepsScale)
+        setScale(display.dateScale, on: dateScale)
+        setScale(display.counterScale, on: counterScale)
+    }
+
+    private func select(_ rawValue: String, in popup: NSPopUpButton) {
+        guard let item = popup.itemArray.first(where: { $0.representedObject as? String == rawValue }) else { return }
+        popup.select(item)
+    }
+
+    private func setScale(_ value: Double, on stepper: NSStepper) {
+        stepper.doubleValue = value
+        scaleValueLabels[ObjectIdentifier(stepper)]?.stringValue = Self.scaleLabel(value)
+    }
+
     private func configure(_ settings: PomodoroSettings, display: DisplaySettings) {
         guard let content = window?.contentView else { return }
         content.wantsLayer = true
